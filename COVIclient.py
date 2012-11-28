@@ -11,6 +11,10 @@ class COVIclient(threading.Thread):
     COVIGuiThread, COVIProcessingThread, and COVINetworkThread
     '''
 
+    '''
+    Flow of execution for a clicked node:
+        network_thread receives NIML 
+    '''
 
     def __init__(self):
         '''
