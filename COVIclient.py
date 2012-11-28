@@ -63,5 +63,15 @@ class COVIProcessingThread(threading.Thread):
             
         return parabola_3
         
-    def create_nido(self):
+    def create_nido(self, src_node, matrix):
+        # nido_array = ['#coordinate-based_segments',]
+        src_coords = self.get_node_coords(src_node)
+        
+        
+    def get_node_coords(self, node):
+        '''
+        Look up a node's xyz coordinates from its node number.
+        '''
+        return range(3)
+        
         
