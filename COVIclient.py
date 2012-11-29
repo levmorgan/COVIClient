@@ -29,9 +29,9 @@ class COVIProcessingThread(threading.Thread):
         Constructor
         '''
         threading.Thread.__init__(self)
-        
-    
-    def interp_parabola(self, p1, p2, normal, height, n=20):
+
+        """
+def interp_parabola(self, p1, p2, normal, height, n=20):
         '''
         Create a parabola of height "height", interpolated at n points, 
         between 3D points p1 and p2, pointing in the direction of 
@@ -60,8 +60,11 @@ class COVIProcessingThread(threading.Thread):
         for i in xrange(3):
             parabola_3[i] = [ j[0] + j[1]*normal[i] 
                              for j in itertools.izip(line[i], parabola_2) ]
-            
         return parabola_3
+        """
+        
+    def interp_circle(self, p1, p2, normal, height=None, n=20):
+        return [[i, i+1, i+2] for i in xrange(n)]
         
     def create_nido(self, src_node, matrix):
         # nido_array = ['#coordinate-based_segments',]
