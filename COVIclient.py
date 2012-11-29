@@ -67,8 +67,31 @@ def interp_parabola(self, p1, p2, normal, height, n=20):
         return [[i, i+1, i+2] for i in xrange(n)]
         
     def create_nido(self, src_node, matrix):
-        # nido_array = ['#coordinate-based_segments',]
+        '''
+        Takes a source node and a list of nodes it's connected to. 
+        Produces a displayable object of circles connecting the source node
+        to destination nodes.
+        '''
+        
         src_coords = self.get_node_coords(src_node)
+        src_normal = self.get_node_normal(src_node)
+        for dst_node in matrix:
+            dst_coords = self.get_node_coords(dst_node)
+            dst_normal = self.get_node_normal(dst_node)
+            average_normal = [(i[0]+i[1])/2. for i in itertools.izip(src_normal, dst_normal)]
+            segments = self.interp_circle(src_coords, dst_coords, average_normal)
+            segments_text = range(1, len(segments))
+            for i in xrange(len(segments_text)):
+                segments_text[i] = "%i %i %i %i %i %i\n"%(
+                                                          segments[i-1][0],
+                                                          segments[i-1][1],
+                                                          segments[i-1][2],
+                                                          segments[i][0],
+                                                          segments[i][1],
+                                                          segments[i][2])
+        segments_text.insert(0, '#coordinate-based_segments')
+            
+                
         
         
     def get_node_coords(self, node):
@@ -76,5 +99,3 @@ def interp_parabola(self, p1, p2, normal, height, n=20):
         Look up a node's xyz coordinates from its node number.
         '''
         return range(3)
-        
-        
