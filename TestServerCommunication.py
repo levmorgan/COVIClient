@@ -4,27 +4,46 @@ Created on Nov 30, 2012
 @author: morganl
 '''
 import unittest, ssl, socket
+import ServerCommunication as sc
 
 
 class TestServerCommunication(unittest.TestCase):
 
+    '''
+    Unit testing for the ServerCommunication module. Assumes there is a dataset called fakedset and 
+    users called 'lev' (an administrator) and 'bob'
+    '''
 
-    def __init__(self):
+    def setUp(self):
+        # Set up a socket        
         client_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sec_clisock = ssl.wrap_socket(client_sock)
         sec_clisock.settimeout(10)
         sec_clisock.connect((socket.gethostname(), 14338))  
-        self.socket = sec_clisock
+        self.sock = sec_clisock
+        
+        # Authenticate
+        sc.auth(self.sock, 'lev', 'lev')
+        
+        # FIXME: Make sure lev, bob, and testdset exist
+
+    def tearDown(self):
+        self.sock.close()
 
 
-    def __del__(self):
-        self.socket.close()
-
-
-    def testName(self):
-        pass
+    def test_new_dset_and_remove(self):
+        res = sc.new_dset(self.sock, 
+                    '/home/morganl/workspace/COVI Server/src/COVIServer/fakedset1.tar.gz', 
+                    'fakedset1')
+        self.assertTrue(res, "Reply for new_dset")
+        print 'Uploaded dataset OK'
+        
+        res = sc.remove(self.sock, 'fakedset1')
+        self.assertTrue(res, "Reply for remove")
+        print 'Removed dataset OK'
 
 
 if __name__ == "__main__":
     #import sys;sys.argv = ['', 'Test.testName']
-    unittest.main()
+    # unittest.main()
+    TestServerCommunication()
