@@ -34,7 +34,7 @@ def handle_response(reply, method, non_json_data=False):
     try:
         reply = json.loads(reply)["covi-response"]
         if reply["type"] == "req fail":
-            raise RequestFailureException(method, reply[""])
+            raise RequestFailureException(method, reply["message"])
         elif reply["type"] == "req ok":
             return 1
         else:
@@ -47,9 +47,25 @@ def handle_response(reply, method, non_json_data=False):
                     "Got a reply from the server that was not valid JSON.")
     except KeyError as e:
         if RequestFailureException.debug:
-            print "KeyError: Reply from server is missing key %s"%(str(e.message))
+            print "KeyError: Reply from server is missing key '%s'"%(str(e))
         raise RequestFailureException(method,
-                    "Got a reply from the server that was missing fields.")
+                    "Got a reply from the server that was missing fields")
+
+def safe_recv(sock, method):
+    try:
+        reply = sock.recv()
+        return reply
+    except ssl.socket_error as e:
+        raise RequestFailureException(method,
+                    str(e))
+
+def safe_send(sock, data, method):
+    try:
+        sock.send(data)
+        
+    except ssl.socket_error as e:
+        raise RequestFailureException(method,
+                    str(e))
 
 def simple_request(sock, req, method):
     '''
@@ -57,19 +73,19 @@ def simple_request(sock, req, method):
     '''    
     sock.send(json.dumps(req))
     try:
-        reply = sock.recv()
+        reply = safe_recv(sock, method)
         return handle_response(reply, method)
-    except ssl.socket_error:
+    except ssl.socket_error as e:
         raise RequestFailureException(method,
-                    "Connection to server was lost. Try reconnecting.")
-
+                    str(e))
+        
 def auth(sock, username, password):
     method = "Authentication"
     req = { "covi-request": { 
                              "type":"auth", 
                              "username":username, 
                              "password":password } }
-    simple_request(sock, req, method)
+    return simple_request(sock, req, method)
 
 def lst(sock):
     method = "List"
@@ -98,22 +114,14 @@ def new_dset(sock, dset_archive, dset_name):
     randf.close()
 
     req = { "covi-request": { "type":"new", 
-                             "dset":dset_archive, 
+                             "dset":dset_name, 
                              "len":rsize, 
                              "md5":md5 } }
-    reply = simple_request(sock, req, method)
-    print "Got reply"
-    if not handle_response(reply):
-        print "Request failed!"
-        print reply
-        return
-    """
-    for i in arr:
-        sock.send(i)
-    """
+    # Should I try to deal with a non-req_ok response here?
+    simple_request(sock, req, method)
     sock.send(arr)
-    print "Reply:"
-    print sock.recv(2048)
+    return handle_response(safe_recv(sock, method), method)
+    
 
 def matrix_req(sock, dset, number):
     method = "Matrix request"
@@ -155,7 +163,7 @@ def rename(sock):
                              "type":"rename", 
                              "old":"fakedset1", 
                              "new":"fakedset2" } }
-    simple_request(sock, req, method)
+    return simple_request(sock, req, method)
 
 def share(sock):
     method = "Share"
@@ -165,7 +173,7 @@ def share(sock):
                              "recipient":"bob", 
                              "write":0, 
                              "share":0 } }
-    simple_request(sock, req, method)
+    return simple_request(sock, req, method)
 
 def copy(sock):
     method = "Copy"
@@ -173,7 +181,7 @@ def copy(sock):
                              "type":"copy", 
                              "source":"fakedset2", 
                              "destination":"fakedset3", } }
-    simple_request(sock, req, method)
+    return simple_request(sock, req, method)
 
 def copy_shared(sock):
     method = "Copy shared"
@@ -182,7 +190,7 @@ def copy_shared(sock):
                              "source":"fakedset2", 
                              "destination":"fakedset4", 
                              "owner":"bob" } }
-    simple_request(sock, req, method)
+    return simple_request(sock, req, method)
 
 
 def remove(sock, dset):
@@ -190,7 +198,7 @@ def remove(sock, dset):
     req = { "covi-request": { 
                              "type":"remove", 
                              "dset":dset } }
-    simple_request(sock, req, method)
+    return simple_request(sock, req, method)
 
 def close(sock):
     sock.send(json.dumps({ "covi-request": { "type":"close" } }))
@@ -203,7 +211,7 @@ def rename_admin(sock, old, new, owner):
                              "owner":owner, 
                              "old":old, 
                              "new":new } }
-    simple_request(sock, req, method)
+    return simple_request(sock, req, method)
     
 
 def remove_admin(sock, dset, owner):
@@ -212,4 +220,4 @@ def remove_admin(sock, dset, owner):
                              "type":"remove admin", 
                              "owner":owner, 
                              "dset":dset } }
-    simple_request(sock, req, method)
+    return simple_request(sock, req, method)
