@@ -172,21 +172,21 @@ def share(sock):
                              "share":0 } }
     return simple_request(sock, req, method)
 
-def copy(sock):
+def copy(sock, source, destination):
     method = "Copy"
     req = { "covi-request": {
                              "type":"copy", 
-                             "source":"fakedset2", 
-                             "destination":"fakedset3", } }
+                             "source":source, 
+                             "destination":destination, } }
     return simple_request(sock, req, method)
 
-def copy_shared(sock):
+def copy_shared(sock, source, destination, owner):
     method = "Copy shared"
     req = { "covi-request": { 
                              "type":"copy shared", 
-                             "source":"fakedset2", 
-                             "destination":"fakedset4", 
-                             "owner":"bob" } }
+                             "source":source, 
+                             "destination":destination, 
+                             "owner":owner } }
     return simple_request(sock, req, method)
 
 
