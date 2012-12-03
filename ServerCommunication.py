@@ -196,6 +196,14 @@ def remove(sock, dset):
                              "dset":dset } }
     return simple_request(sock, req, method)
 
+def remove_shared(sock, dset, owner):
+    method = "Remove shared"
+    req = { "covi-request": { 
+                             "type":"remove shared", 
+                             "owner":owner, 
+                             "dset":dset } }
+    return simple_request(sock, req, method)
+
 def close(sock):
     sock.send(json.dumps({ "covi-request": { "type":"close" } }))
    
