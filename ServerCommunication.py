@@ -135,7 +135,6 @@ def matrix_req(sock, dset, number):
     if not res:
         return
     else:
-        print res
         length = res["len"]
         md5_hash = res["md5"]
         
@@ -154,12 +153,12 @@ def matrix_req(sock, dset, number):
                         " try your request again.")
         return reply
         
-def rename(sock):
+def rename(sock, old, new):
     method = "Rename"
     req = { "covi-request": { 
                              "type":"rename", 
-                             "old":"fakedset1", 
-                             "new":"fakedset2" } }
+                             "old":old, 
+                             "new":new } }
     return simple_request(sock, req, method)
 
 def share(sock):
