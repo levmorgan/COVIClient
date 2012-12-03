@@ -138,24 +138,21 @@ def matrix_req(sock, dset, number):
         print res
         length = res["len"]
         md5_hash = res["md5"]
-        print "Sending recv ok"
+        
         sock.send(json.dumps({ "covi-request": { "type":"resp ok" } }))
         reply = ''
-        print "Starting to recv matrix"
+        
         while len(reply) < length:
             # I know this is slow! This is just for debugging!
-            res = sock.recv()
-            res = handle_response(res, no_json=True)
-            if not res:
-                return
+            res = safe_recv(sock, method)
+            res = handle_response(res, method, non_json_data=True)
             reply += res
-        recv_hash = hashlib.md5(res).hexdigest()
-        print "Hash of received data:"
-        print recv_hash
-        print "Hash from server:"
-        print md5_hash
-        print "Equal? "
-        print recv_hash == md5_hash
+        recv_hash = hashlib.md5(reply).hexdigest()
+        if recv_hash != md5_hash:
+            raise RequestFailureException(method, 
+                        "Connectivity data from the server was invalid,"+
+                        " try your request again.")
+        return reply
         
 def rename(sock):
     method = "Rename"
