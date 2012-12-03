@@ -15,7 +15,7 @@ class TestServerCommunication(unittest.TestCase):
     
     
     Tests methods:
-    handle_response
+        xhandle_response
         xsafe_recv
         xsafe_send
         xsimple_request
@@ -23,12 +23,12 @@ class TestServerCommunication(unittest.TestCase):
         xlst
         xnew_dset
         xmatrix_req
-        rename
+        xrename
         share
-        copy
+        xcopy
         copy_shared
         xremove
-        close
+        xclose
         rename_admin
         remove_admin
 
@@ -48,6 +48,7 @@ class TestServerCommunication(unittest.TestCase):
         # FIXME: Make sure lev, bob, and testdset exist
 
     def tearDown(self):
+        sc.close(self.sock)
         self.sock.close()
     
 
@@ -69,7 +70,7 @@ class TestServerCommunication(unittest.TestCase):
         self.assertTrue("shared" in dkeys)
         self.assertTrue("requests" in dkeys)
         
-        for i in itertools.chain(dsets['list'], dsets["shared"]):
+        for i in itertools.chain(dsets['list']):
             # Request a random matrix for each dset
             # Nothing to assert here, the method checks the data
             sc.matrix_req(self.sock, i, random.randint(1,500))
@@ -77,8 +78,50 @@ class TestServerCommunication(unittest.TestCase):
     def test_copy_and_remove(self):
         dsets = sc.lst(self.sock)
         dsets = dsets['list']
+        self.assertGreater(len(dsets), 0)
+        test_elt = dsets[0]
+        test_elt_copy = dsets[0]+"copied"
+        sc.copy(self.sock, test_elt, test_elt_copy)
+        dsets = sc.lst(self.sock)['list']
+        self.assertTrue(test_elt_copy in dsets, "Copied element exists")
+        sc.remove(self.sock, test_elt_copy)
+        dsets = sc.lst(self.sock)['list']
+        self.assertTrue(not (test_elt_copy in dsets), "Copied element deleted")
+            
+    def test_rename(self):
+        # Get a list of datasets
+        dsets = sc.lst(self.sock)
+        dsets = dsets['list']
         
-
+        # Choose an elt and rename
+        test_elt = dsets[0]
+        test_elt_renamed = dsets[0]+'renamed'
+        sc.rename(self.sock, test_elt, test_elt_renamed)
+        
+        # Get a new list of datasets
+        dsets = sc.lst(self.sock)
+        dsets = dsets['list']
+        
+        # Make sure original is not present and new one is
+        self.assertTrue(
+                        (test_elt_renamed in dsets)
+                        and
+                        (not (test_elt in dsets)), 
+                        "Copied element deleted")
+        
+        sc.rename(self.sock, test_elt_renamed, test_elt)
+        
+        # Get a new list of datasets
+        dsets = sc.lst(self.sock)
+        dsets = dsets['list']
+        
+        # Make sure the second rename also worked
+        self.assertTrue(
+                        (not (test_elt_renamed in dsets))
+                        and
+                        (not (test_elt in dsets), 
+                        "Copied element deleted"))
+        
 if __name__ == "__main__":
     #import sys;sys.argv = ['', 'Test.testName']
     unittest.main()
