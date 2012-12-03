@@ -168,7 +168,7 @@ def share(sock):
                              "dset":"fakedset2", 
                              "recipient":"bob", 
                              "write":0, 
-                             "share":0 } }
+                             "can share":0 } }
     return simple_request(sock, req, method)
 
 def copy(sock, source, destination):
