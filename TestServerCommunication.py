@@ -24,10 +24,12 @@ class TestServerCommunication(unittest.TestCase):
         xnew_dset
         xmatrix_req
         xrename
-        share
+        xshare
+        xunshare
         xcopy
         copy_shared
         xremove
+        remove_shared
         xclose
         rename_admin
         remove_admin
@@ -125,6 +127,27 @@ class TestServerCommunication(unittest.TestCase):
                         and
                         (not (test_elt in dsets), 
                         "Copied element deleted"))
+    
+    def test_share_and_unshare(self):
+        # Get a list of datasets
+        dsets = sc.lst(self.sock)['list']
+        test_elt = dsets[0]
+        
+        # Share the dataset with a user
+        sc.share(self.sock, test_elt, 'bob', 0)
+        dsets = sc.lst(self.sock)
+        dsets = dsets["user's shares"]
+        
+        self.assertTrue((["lev", "bob", test_elt, 0, 1] in dsets), 
+                        "Dataset shared successfully")
+        
+        # Unshare the shared dataset
+        sc.unshare(self.sock, test_elt, 'bob')
+        dsets = sc.lst(self.sock)["user's shares"]
+        self.assertTrue(not (["lev", "bob", test_elt, 0, 1] in dsets), 
+                        "Dataset unshared successfully")
+        
+        
         
 if __name__ == "__main__":
     #import sys;sys.argv = ['', 'Test.testName']
