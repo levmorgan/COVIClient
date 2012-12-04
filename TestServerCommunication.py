@@ -147,6 +147,25 @@ class TestServerCommunication(unittest.TestCase):
         self.assertTrue(not (["lev", "bob", test_elt, 0, 1] in dsets), 
                         "Dataset unshared successfully")
         
+    def test_copy_shared(self):
+        # Get a list of datasets
+        dsets = sc.lst(self.sock)['shared']
+        test_elt = dsets[0]
+        copied_elt = test_elt[2]+'copied'
+        
+        # Copy a shared dataset
+        sc.copy_shared(self.sock, test_elt[2], copied_elt, test_elt[0])
+        
+        # Assert copy succeeded
+        dsets = sc.lst(self.sock)['list']
+        self.assertIn(copied_elt, dsets, "Shared dataset not copied")
+        
+        # Remove copied dataset
+        sc.remove(self.sock, copied_elt)
+        
+        # Assert copy succeeded
+        dsets = sc.lst(self.sock)['list']
+        self.assertNotIn(copied_elt, dsets, "Shared dataset copy not removed")
         
         
 if __name__ == "__main__":
