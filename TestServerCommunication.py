@@ -55,17 +55,18 @@ class TestServerCommunication(unittest.TestCase):
     
 
     def test_new_dset_and_remove(self):
-        res = sc.new_dset(self.sock, 
+        sc.new_dset(self.sock, 
                     '/home/morganl/workspace/COVI Server/src/COVIServer/fakedset1.tar.gz', 
                     'fakedset1')
-        self.assertTrue(res, "Reply for new_dset")
-        print 'Uploaded dataset OK'
+        dsets = sc.lst(self.sock)['list']
+        self.assertTrue(('fakedset1' in dsets), "New dataset uploaded")
         
-        res = sc.remove(self.sock, 'fakedset1')
-        self.assertTrue(res, "Reply for remove")
-        print 'Removed dataset OK'
+        sc.remove(self.sock, 'fakedset1')
+        dsets = sc.lst(self.sock)['list']
+        self.assertTrue(not ('fakedset1' in dsets), "New dataset deleted")
 
     def test_list_and_matrix(self):
+        # Try and verify a list request
         dsets = sc.lst(self.sock)
         dkeys = dsets.keys()
         self.assertTrue("list" in dkeys,
@@ -83,14 +84,19 @@ class TestServerCommunication(unittest.TestCase):
             sc.matrix_req(self.sock, i, random.randint(1,500))
             
     def test_copy_and_remove(self):
+        # Choose a test element
         dsets = sc.lst(self.sock)
         dsets = dsets['list']
         self.assertGreater(len(dsets), 0)
         test_elt = dsets[0]
         test_elt_copy = dsets[0]+"copied"
+        
+        # Try and verify a copy operation
         sc.copy(self.sock, test_elt, test_elt_copy)
         dsets = sc.lst(self.sock)['list']
         self.assertTrue(test_elt_copy in dsets, "Copied element exists")
+        
+        # Try a verify a remove operation
         sc.remove(self.sock, test_elt_copy)
         dsets = sc.lst(self.sock)['list']
         self.assertTrue(not (test_elt_copy in dsets), "Copied element deleted")
