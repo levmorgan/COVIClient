@@ -27,9 +27,9 @@ class TestServerCommunication(unittest.TestCase):
         xshare
         xunshare
         xcopy
-        copy_shared
+        xcopy_shared
         xremove
-        remove_shared
+        xremove_shared
         xclose
         rename_admin
         remove_admin
@@ -169,9 +169,29 @@ class TestServerCommunication(unittest.TestCase):
         # Remove copied dataset
         sc.remove(self.sock, copied_elt)
         
-        # Assert copy succeeded
+        # Assert remove succeeded
         dsets = sc.lst(self.sock)['list']
         self.assertNotIn(copied_elt, dsets, "Shared dataset copy not removed")
+    
+    def test_remove_shared(self):
+        # Get a list of datasets
+        dsets = sc.lst(self.sock)['list']
+        test_elt = dsets[0]
+        
+        # Share test_elt with bob
+        sc.share(self.sock, test_elt, 'bob', 0)
+        
+        # auth as bob
+        sc.auth(self.sock, 'bob', 'bob')
+        
+        # remove shared dataset
+        sc.remove_shared(self.sock, test_elt, 'lev')
+        
+        # verify dataset was removed
+        dsets = sc.lst(self.sock)["requests"]
+        self.assertTrue(not (["lev", "bob", test_elt, 0, 1] in dsets), 
+                        "Shared dataset removed successfully")
+        
         
         
 if __name__ == "__main__":
