@@ -192,7 +192,25 @@ class TestServerCommunication(unittest.TestCase):
         self.assertTrue(not (["lev", "bob", test_elt, 0, 1] in dsets), 
                         "Shared dataset removed successfully")
         
+    def test_rename_admin(self):
+        # Get a dataset owned by bob
+        sc.auth(self.sock, 'bob', 'bob')
+        dsets = sc.lst(self.sock)['list']
+        test_elt = dsets[0]
+        ren_elt = test_elt+'renamed'
         
+        # Rename the dataset
+        sc.auth(self.sock, 'lev', 'lev')
+        sc.rename_admin(self.sock, test_elt, ren_elt, 'bob')
+        
+        # Verify the rename
+        sc.auth(self.sock, 'bob', 'bob')
+        dsets = sc.lst(self.sock)['list']
+        self.assertIn(ren_elt, dsets, "Other user's dataset not renamed!")
+        
+        # Put things back the way they were
+        sc.rename(self.sock, ren_elt, test_elt)
+        sc.auth(self.sock, 'lev', 'lev')
         
 if __name__ == "__main__":
     #import sys;sys.argv = ['', 'Test.testName']
