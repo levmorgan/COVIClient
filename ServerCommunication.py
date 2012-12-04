@@ -255,3 +255,11 @@ def remove_admin(sock, dset, owner):
                              "owner":owner, 
                              "dset":dset } }
     return simple_request(sock, req, method)
+
+if __name__ == '__main__':
+    import socket
+    client_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sec_clisock = ssl.wrap_socket(client_sock)
+    sec_clisock.settimeout(10)
+    sec_clisock.connect((socket.gethostname(), 14338))
+    sock = sec_clisock
