@@ -161,14 +161,15 @@ def rename(sock, old, new):
                              "new":new } }
     return simple_request(sock, req, method)
 
-def share(sock):
+def share(sock, dset, recipient, can_share):
     method = "Share"
+    if (can_share != 0) and (can_share != 1):
+        raise ValueError("can_share must be 0 or 1, not %s"%(str(can_share))) 
     req = { "covi-request": { 
                              "type":"share", 
-                             "dset":"fakedset2", 
-                             "recipient":"bob", 
-                             "write":0, 
-                             "can share":0 } }
+                             "dset":dset, 
+                             "recipient":recipient, 
+                             "can share":can_share } }
     return simple_request(sock, req, method)
 
 def copy(sock, source, destination):
