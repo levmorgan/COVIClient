@@ -181,6 +181,14 @@ def share(sock, dset, recipient, can_share):
                              "can share":can_share } }
     return simple_request(sock, req, method)
 
+def unshare(sock, dset, recipient):
+    method = "Unshare"
+    req = { "covi-request": { 
+                             "type":"unshare", 
+                             "recipient":recipient, 
+                             "dset":dset } }
+    return simple_request(sock, req, method)
+
 def copy(sock, source, destination):
     method = "Copy"
     req = { "covi-request": {
