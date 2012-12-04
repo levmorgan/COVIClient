@@ -66,9 +66,14 @@ class TestServerCommunication(unittest.TestCase):
     def test_list_and_matrix(self):
         dsets = sc.lst(self.sock)
         dkeys = dsets.keys()
-        self.assertTrue("list" in dkeys)
-        self.assertTrue("shared" in dkeys)
-        self.assertTrue("requests" in dkeys)
+        self.assertTrue("list" in dkeys,
+                        "list in lst response")
+        self.assertTrue("shared" in dkeys,
+                        "shared in lst response")
+        self.assertTrue("requests" in dkeys,
+                        "requests in lst response")
+        self.assertTrue("user's shares" in dkeys, 
+                        "user's shares in lst response")
         
         for i in itertools.chain(dsets['list']):
             # Request a random matrix for each dset
@@ -90,8 +95,7 @@ class TestServerCommunication(unittest.TestCase):
             
     def test_rename(self):
         # Get a list of datasets
-        dsets = sc.lst(self.sock)
-        dsets = dsets['list']
+        dsets = sc.lst(self.sock)['list']
         
         # Choose an elt and rename
         test_elt = dsets[0]
