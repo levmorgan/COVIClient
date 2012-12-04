@@ -1,4 +1,10 @@
-import socket, ssl, json, array, os, hashlib, random
+import ssl, json, array, os, hashlib
+'''
+A module for communicating between COVI Client and COVI server.
+Should throw only RequestFailureException as long as only expected
+bad things happen.
+'''
+
 
 class RequestFailureException(Exception):
     '''
@@ -52,6 +58,9 @@ def handle_response(reply, method, non_json_data=False):
                     "Got a reply from the server that was missing fields")
 
 def safe_recv(sock, method):
+    '''
+    Try to recieve network data, catching timeouts
+    '''
     try:
         reply = sock.recv()
         return reply
@@ -181,6 +190,9 @@ def copy(sock, source, destination):
     return simple_request(sock, req, method)
 
 def copy_shared(sock, source, destination, owner):
+    '''
+    Copy a shared dataset to the user's directory
+    '''
     method = "Copy shared"
     req = { "covi-request": { 
                              "type":"copy shared", 
@@ -198,6 +210,9 @@ def remove(sock, dset):
     return simple_request(sock, req, method)
 
 def remove_shared(sock, dset, owner):
+    '''
+    Remove a dataset shared to the user
+    '''
     method = "Remove shared"
     req = { "covi-request": { 
                              "type":"remove shared", 
@@ -210,6 +225,9 @@ def close(sock):
    
     
 def rename_admin(sock, old, new, owner):
+    '''
+    Rename an arbitrary user's dataset as an administrator
+    '''
     method = "Administrative Rename"
     req = { "covi-request": { 
                              "type":"rename admin", 
@@ -220,6 +238,9 @@ def rename_admin(sock, old, new, owner):
     
 
 def remove_admin(sock, dset, owner):
+    '''
+    Remove an arbitrary user's dataset as an administrator
+    '''
     method = "Administrative Remove"
     req = { "covi-request": { 
                              "type":"remove admin", 
