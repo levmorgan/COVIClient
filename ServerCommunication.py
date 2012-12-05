@@ -140,7 +140,6 @@ def matrix_req(sock, dset, number):
                              "number":number } }
     res = simple_request(sock, req, method)
     
-    # FIXME: MAKE ALL OF THIS WORK. I'm too tired right now and would screw it up.
     if not res:
         return
     else:

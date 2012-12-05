@@ -31,13 +31,15 @@ class TestServerCommunication(unittest.TestCase):
         xremove
         xremove_shared
         xclose
-        rename_admin
-        remove_admin
+        xrename_admin
+        xremove_admin
 
     '''
     
+    #TODO: Test all possible error states
+    
     def setUp(self):
-        # Set up a socket        
+        # Set up a socket
         client_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sec_clisock = ssl.wrap_socket(client_sock)
         sec_clisock.settimeout(10)
@@ -210,6 +212,30 @@ class TestServerCommunication(unittest.TestCase):
         
         # Put things back the way they were
         sc.rename(self.sock, ren_elt, test_elt)
+        sc.auth(self.sock, 'lev', 'lev')
+        
+    def test_remove_admin(self):
+        # Get a dataset owned by bob
+        sc.auth(self.sock, 'bob', 'bob')
+        dsets = sc.lst(self.sock)['list']
+        test_elt = dsets[0]
+        cop_elt = test_elt+'copied'
+        sc.copy(self.sock, test_elt, cop_elt)
+        
+        # Verify the copied element is there
+        dsets = sc.lst(self.sock)['list']
+        self.assertIn(cop_elt, dsets, "Other user's dataset not copied!")
+        
+        # Rename the dataset
+        sc.auth(self.sock, 'lev', 'lev')
+        sc.remove_admin(self.sock, cop_elt, 'bob')
+        
+        # Verify the rename
+        sc.auth(self.sock, 'bob', 'bob')
+        dsets = sc.lst(self.sock)['list']
+        self.assertNotIn(cop_elt, dsets, "Other user's dataset not removed!")
+        
+        # Put things back the way they were
         sc.auth(self.sock, 'lev', 'lev')
         
 if __name__ == "__main__":
