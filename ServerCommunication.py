@@ -80,13 +80,16 @@ def simple_request(sock, req, method):
     '''
     Convert the request to JSON, send it, and run handle_response on the reply
     '''    
-    sock.send(json.dumps(req))
     try:
-        reply = safe_recv(sock, method)
+        sock.send(json.dumps(req))
+        #reply = safe_recv(sock, method)
+        # Let's not use safe_recv and return the actual exception on timeout
+        reply = sock.recv()
         return handle_response(reply, method)
-    except ssl.socket_error as e:
-        raise RequestFailureException(method,
-                    str(e))
+    except ssl.socket_error:
+        #raise RequestFailureException(method,
+        #            str(e))
+        raise 
         
 def auth(sock, username, password):
     method = "Authentication"
@@ -126,10 +129,11 @@ def new_dset(sock, dset_archive, dset_name):
                              "dset":dset_name, 
                              "len":rsize, 
                              "md5":md5 } }
-    # Should I try to deal with a non-req_ok response here?
+    #FIXME: Should I try to deal with a non-req_ok response here?
     simple_request(sock, req, method)
     sock.send(arr)
-    return handle_response(safe_recv(sock, method), method)
+    #return handle_response(safe_recv(sock, method), method)
+    return handle_response(sock.recv(), method)
     
 
 def matrix_req(sock, dset, number):
@@ -151,7 +155,8 @@ def matrix_req(sock, dset, number):
         
         while len(reply) < length:
             # I know this is slow! This is just for debugging!
-            res = safe_recv(sock, method)
+            #res = safe_recv(sock, method)
+            res = sock.recv()
             res = handle_response(res, method, non_json_data=True)
             reply += res
         recv_hash = hashlib.md5(reply).hexdigest()
