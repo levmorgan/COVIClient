@@ -1,4 +1,5 @@
-import ssl, json, array, os, hashlib
+import ssl, json, array, os, hashlib, tarfile, inspect
+
 '''
 A module for communicating between COVI Client and COVI server.
 Should throw only RequestFailureException as long as only expected
@@ -165,7 +166,53 @@ def matrix_req(sock, dset, number):
                         "Connectivity data from the server was invalid,"+
                         " try your request again.")
         return reply
+    
+def surface(sock, dset):
+    method = "Surface request"
+    req = { "covi-request": { 
+                             "type":"surface",
+                             "dset":dset } }
+    res = simple_request(sock, req, method)
+    
+    if not res:
+        return
+    else:
+        length = res["len"]
+        md5_hash = res["md5"]
         
+        sock.send(json.dumps({ "covi-request": { "type":"resp ok" } }))
+        reply = ''
+        
+        while len(reply) < length:
+            # I know this is slow! This is just for debugging!
+            #res = safe_recv(sock, method)
+            res = sock.recv()
+            res = handle_response(res, method, non_json_data=True)
+            reply += res
+        recv_hash = hashlib.md5(reply).hexdigest()
+        if recv_hash != md5_hash:
+            raise RequestFailureException(method, 
+                        "Surface data from the server was corrupted,"+
+                        " try your request again.")
+    
+    # Write the data to disk and extract it
+    try:
+        file_dir = os.path.dirname(inspect.stack[-1][1])
+        arch_fi_name = os.path.join(file_dir, dset+'-surfaces.tar.gz')
+        arch_fi = open(arch_fi_name, 'wb')
+        arch_fi.write(reply)
+        arch_fi.close()
+        
+        arch_fi = open(arch_fi_name, 'rb')
+        surface_dir = os.path.join(file_dir, dset+'-surfaces')
+        os.mkdir(surface_dir)
+        tar = tarfile.TarFile.gzopen(name=None, mode='r', fileobj=arch_fi)
+        tar.extractall(surface_dir)
+        arch_fi.close()
+        os.remove(arch_fi_name)
+    except:
+        raise
+                
 def rename(sock, old, new):
     method = "Rename"
     req = { "covi-request": { 
