@@ -2,6 +2,7 @@ import Tkinter as tk
 import ttk
 import tkFileDialog, tkMessageBox, re
 from tkSimpleDialog import Dialog
+from NetworkThread import NetworkThread
 
 def is_error(obj):
     return isinstance(obj, Exception)
@@ -150,10 +151,18 @@ class InitWindow:
         self.user_var = tk.StringVar()
         self.pass_var = tk.StringVar()
 
-        self. fields = {self.addr_var:"Address",
-            self.port_var:"Port",
-            self.user_var:"Username",
-            self.pass_var:"Password"}
+        self.fields = [
+            self.addr_var,
+            self.port_var,
+            self.user_var,
+            self.pass_var,
+            ]
+
+        self.field_names = {
+            str(self.addr_var):"Address",
+            str(self.port_var):"Port",
+            str(self.user_var):"Username",
+            str(self.pass_var):"Password"}
 
         txt_len = 60
 
@@ -211,7 +220,7 @@ class InitWindow:
 
         # Bind the relevant keys
         #root.grab_set()
-        self.real_root.bind("<Return>", self.ok)
+        self.real_root.bind("<Return>", self.ok_command)
    
     def radio_command(self):
         if self.radio_var.get() == 0:
@@ -234,24 +243,26 @@ class InitWindow:
     def validate(self):
         MAX_FIELD_LENGTH = 140
         for i in self.fields:
-            if len(i) > MAX_FIELD_LENGTH:
+            value = str(i.get())
+            if len(value) > MAX_FIELD_LENGTH:
                 tkMessageBox.showwarning("Validation Error",
                     "Field %s has a maximum length of %i"%(
-                        self.fields[i], MAX_FIELD_LENGTH))
-            if len(i) < 2:
+                        self.field_names[str(i)], MAX_FIELD_LENGTH))
+            if len(value) < 2:
                 tkMessageBox.showwarning("Validation Error",
                     "Field %s has a minimum length of %i"%(
-                        self.fields[i], 2))
+                        self.field_names[str(i)], 2))
                 return 0
-            if not re.match("[0-9A-Za-z\-\.]", i):
+            if not re.match("[0-9A-Za-z\-\.]", value):
                 tkMessageBox.showwarning("Validation Error",
                     "Invalid characters in %s: %s"%(
-                        self.fields[i], 
+                        self.field_names[str(i)], 
                         ' '.join(
                             set(
                             re.findall('[^0-9A-Za-z\-\.]')
                             ))))
                 return 0
+        return 1
                 
     def cleanup(self):
         '''
@@ -264,25 +275,28 @@ class InitWindow:
         if not self.validate():
             return
             
-        if self.radio_var == 0:
+        if self.radio_var.get() == 0:
             # Get data from a server
-            self.mode = 'server'
             # Authenticate with the server
+            print "Adding job"
             self.net_thread.job_q.put(
                 ['auth', self.user_var, self.pass_var])
             # TODO: start a progress bar
+            print "Trying to get response"
             response = self.net_thread.res_q.get()
             self.response = response
+            print self.response
             
             if is_error(response):
                 tkMessageBox.showwarning("Problem During Authentication",
-                                        res.message)
+                                        response.message)
                 set_state(self.root, state='enabled')
                 # TODO: stop progress bar
                 return
+            self.mode = 'server'
             
             pass
-        else:
+        elif self.radio_var.get() == 1:
             # TODO: Go into local dataset mode
             self.mode = 'local'
 
@@ -380,9 +394,11 @@ class ServerDsetWindow(Dialog):
 
 root = tk.Tk()
 #init_window = InitWindow(root)
+'''
 ServerDsetWindow(root, title="Select Dataset", 
                         dsets={'list':[], 'shared':[], 
                         'requests':[], "user's shares":[]})
-#MainWindow(root)
+                        '''
+MainWindow(root)
 center_window(root)
 root.mainloop()
