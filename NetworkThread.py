@@ -1,5 +1,5 @@
 import ServerCommunication as sc
-import threading
+import threading, socket, ssl
 from Queue import Queue
 
 class NetworkThread(threading.Thread):
@@ -30,8 +30,20 @@ class NetworkThread(threading.Thread):
         # Take a job off the job queue, 
         # blocking if it's empty
         job = self.job_q.get()
+        if job[0] == 'connect':
+            try:
+                self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                self.sock = ssl.wrap_socket(sock)
+                self.sock.set_timeout(10)
+                self.sock.connect((job[1], job[2]))
+                self.res_q.put(True)
+            except Exception as e:
+                self.res_q.put(e)
+            finally:
+                return
+
         try:
-            res = self.dispatch[job[0]](*job[1:])
+            res = self.dispatch[job[0]](self.sock, *job[1:])
         except Exception as e:
             res = e
         self.res_q.put(res)
