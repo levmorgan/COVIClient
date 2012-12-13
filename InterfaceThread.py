@@ -71,7 +71,7 @@ class MainWindow:
     def __init__(self, real_root):
         # Set up a network thread
         self.net_thread = NetworkThread()
-
+        self.net_thread.start()
 
         self.real_root = real_root
         self.root = ttk.Frame(real_root)
@@ -86,23 +86,26 @@ class MainWindow:
         set_state(self.root)
         self.real_root.withdraw()
         init_dialog = tk.Toplevel()
-        init = InitWindow(self, init_dialog)
+        init = InitWindow(init_dialog, self.net_thread)
         center_window(init_dialog)
         root.wait_window(init_dialog)
 
         if init.mode == 'server':
-            dset_dialog = ServerDsetWindow(self.real_root)
+            dset_dialog = ServerDsetWindow(self.real_root,
+                                            dset=init.reply,
+                                            net_thread=self.net_thread,)
+            root.wait_window(dset_dialog)
         
 
 
 
 class InitWindow:
-    def __init__(self, parent, real_root):
+    def __init__(self, real_root, net_thread):
         '''
         Create a window that allows a user to log in to a server 
         or to load a local dataset
         '''
-        self.parent = parent
+        self.net_thread = net_thread
         self.real_root = real_root
         self.root = ttk.Frame(real_root)
         root = self.root
@@ -269,6 +272,7 @@ class InitWindow:
                 ['auth', self.user_var, self.pass_var])
             # TODO: start a progress bar
             response = self.net_thread.res_q.get()
+            self.response = response
             
             if is_error(response):
                 tkMessageBox.showwarning("Problem During Authentication",
@@ -314,6 +318,7 @@ class ServerDsetWindow(Dialog):
             sendable-json.json
         '''
         self.root = root
+        self.net_thread = kwargs['net_thread']
         center_window(self)
         tree = ttk.Treeview(root, selectmode='browse',
                             show="tree")
