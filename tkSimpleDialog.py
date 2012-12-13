@@ -7,7 +7,7 @@ class Dialog(tk.Toplevel):
     Dialog class adapted from http://www.pythonware.com/library/tkinter/introduction/dialog-windows.htm
     '''
 
-    def __init__(self, parent, title = None):
+    def __init__(self, parent, title = None, **kwargs):
 
         tk.Toplevel.__init__(self, parent)
         self.transient(parent)
@@ -20,7 +20,7 @@ class Dialog(tk.Toplevel):
         self.result = None
 
         body = tk.Frame(self)
-        self.initial_focus = self.body(body)
+        self.initial_focus = self.body(body, **kwargs)
         body.pack(padx=5, pady=5)
 
         self.buttonbox()
@@ -42,7 +42,7 @@ class Dialog(tk.Toplevel):
     #
     # construction hooks
 
-    def body(self, master):
+    def body(self, master, **kwargs):
         # create dialog body.  return widget that should have
         # initial focus.  this method should be overridden
 
@@ -54,13 +54,13 @@ class Dialog(tk.Toplevel):
         
         box = tk.Frame(self)
 
-        w = ttk.Button(box, text="OK", width=10, command=self.ok, default=ACTIVE)
-        w.pack(side=LEFT, padx=5, pady=5)
+        w = ttk.Button(box, text="OK", width=10, command=self.ok, default=tk.ACTIVE)
+        w.pack(side=tk.LEFT, padx=5, pady=5)
         w = ttk.Button(box, text="Cancel", width=10, command=self.cancel)
-        w.pack(side=LEFT, padx=5, pady=5)
+        w.pack(side=tk.LEFT, padx=5, pady=5)
 
-        self.bind("&lt;Return>", self.ok)
-        self.bind("&lt;Escape>", self.cancel)
+        self.bind("<Return>", self.ok)
+        self.bind("<Escape>", self.cancel)
 
         box.pack()
 
@@ -80,8 +80,13 @@ class Dialog(tk.Toplevel):
 
         self.cancel()
 
-    def cancel(self, event=None):
+    def cleanup(self):
+        # Clean up before closing the window
+        pass
 
+    def cancel(self, event=None):
+        self.cleanup() 
+        
         # put focus back to the parent window
         self.parent.focus_set()
         self.destroy()

@@ -3,16 +3,21 @@ import ttk
 import tkFileDialog, tkMessageBox, re
 from tkSimpleDialog import Dialog
 
+def is_error(obj):
+    return isinstance(obj, Exception)
+
 def valid_dset(dset):
     '''
     Check to see whether a directory is a valid COVI dataset
     '''
+    # TODO: Finish valid_dset
     print dset
     return True
 
 def set_state(widget, state='disabled'):
         '''
-        Enable or disable a widget and all its children
+        Enable or disable a widget and all its children.
+        Disable by default.
         '''
         try:
             widget.configure(state=state)
@@ -64,6 +69,10 @@ def center_window(window):
 
 class MainWindow:
     def __init__(self, real_root):
+        # Set up a network thread
+        self.net_thread = NetworkThread()
+
+
         self.real_root = real_root
         self.root = ttk.Frame(real_root)
         root = self.root
@@ -81,6 +90,11 @@ class MainWindow:
         center_window(init_dialog)
         root.wait_window(init_dialog)
 
+        if init.mode == 'server':
+            dset_dialog = ServerDsetWindow(self.real_root)
+        
+
+
 
 class InitWindow:
     def __init__(self, parent, real_root):
@@ -95,6 +109,9 @@ class InitWindow:
         root.pack()
         top_label = ttk.Label(root, text="Data Source:")
         top_label.pack(anchor=tk.W)
+
+        # can be 'local', 'server', or '' (cancelled)
+        self.mode = ''
 
         # Set up frames
         self.server_frame = ttk.Frame(root)
@@ -185,7 +202,7 @@ class InitWindow:
         self.radio_command()
 
         ok_button = ttk.Button(root, text="Ok",
-                                command=self.ok)
+                                command=self.ok_command)
         ok_button.pack(anchor=tk.E)
 
 
@@ -217,11 +234,11 @@ class InitWindow:
             if len(i) > MAX_FIELD_LENGTH:
                 tkMessageBox.showwarning("Validation Error",
                     "Field %s has a maximum length of %i"%(
-                        self.fields[i], MAX_FIELD_LENGTH)
+                        self.fields[i], MAX_FIELD_LENGTH))
             if len(i) < 2:
                 tkMessageBox.showwarning("Validation Error",
                     "Field %s has a minimum length of %i"%(
-                        self.fields[i], 2)
+                        self.fields[i], 2))
                 return 0
             if not re.match("[0-9A-Za-z\-\.]", i):
                 tkMessageBox.showwarning("Validation Error",
@@ -230,32 +247,137 @@ class InitWindow:
                         ' '.join(
                             set(
                             re.findall('[^0-9A-Za-z\-\.]')
-                            )))
+                            ))))
                 return 0
                 
+    def cleanup(self):
+        '''
+        Cleanup method, called when 'Cancel' is clicked but before
+        the window is closed.
+        '''
+        self.mode = ''
 
-    def ok(self, event=None):
+    def ok_command(self, event=None):
         if not self.validate():
+            return
             
         if self.radio_var == 0:
-            # Go into server mode
+            # Get data from a server
+            self.mode = 'server'
+            # Authenticate with the server
+            self.net_thread.job_q.put(
+                ['auth', self.user_var, self.pass_var])
+            # TODO: start a progress bar
+            response = self.net_thread.res_q.get()
+            
+            if is_error(response):
+                tkMessageBox.showwarning("Problem During Authentication",
+                                        res.message)
+                set_state(self.root, state='enabled')
+                # TODO: stop progress bar
+                return
             
             pass
         else:
-            # Go into local dataset mode
-            pass
+            # TODO: Go into local dataset mode
+            self.mode = 'local'
 
         tkMessageBox.showinfo("Radical!", "You hit OK! Way to go!")
+        self.real_root.destroy()
 
 class ServerDsetWindow(Dialog):
-    def body(self):
+
+    
+    def rename_command(self):
         pass
+    
+    
+    def delete_command(self):
+        pass
+    
+    
+    def share_command(self):
+        pass
+    
+    
+    def accept_command(self):
+        pass
+    
+    
+    def body(self, root, **kwargs):
+        '''
+        Create the body of the window, made up of a Treeview
+        with the datasets on the server and share requests, and the
+        relevant buttons.
+
+        args should be the body of a list response, documented in 
+            sendable-json.json
+        '''
+        self.root = root
+        center_window(self)
+        tree = ttk.Treeview(root, selectmode='browse',
+                            show="tree")
+        
+        # Insert nodes into the tree
+        if 'dsets' in kwargs:
+            dsets = kwargs['dsets']
+            tree.insert('', 'end', 'list',
+                        text='Your Datasets')
+            # Sort the lists of datasets
+            [dsets[i].sort() for i in dsets]
+
+            for i in dsets['list']:
+                tree.insert('list', 'end', i, text=i)
+
+            tree.insert('', 'end', 'shared', 
+                        text="Shared with you")
+            for i in dsets['shared']:
+                tree.insert('shared', 'end', 'share'+i[0]+'/'+i[2],
+                            text='Owner: %s\n%s'%(i[0], i[2]))
+
+            tree.insert('', 'end', 'requests', 
+                        text="Share Requests")
+            for i in dsets['requests']:
+                tree.insert('requests', 'end', 'req'+i[0]+'/'+i[2],
+                            text='From: %s\n%s'%(i[0], i[2]))
+
+            tree.insert("", "end", "user's shares", 
+                        text="Shared by you")
+            for i in dsets["user's shares"]:
+                tree.insert("user's shares", "end", 'usrs'+i[0]+"/"+i[2],
+                            text="To: %s\n%s"%(i[0], i[2]))
+
+            # Insert 'None' nodes in empty categories
+            [tree.insert(i, "end", i+"none", text="None") for i in dsets
+                if not dsets[i]]
+
+        tree.pack(anchor=tk.W, side=tk.LEFT)
+
+        button_frame = tk.Frame(root)
+        button_frame.pack(anchor=tk.E, padx=(5,0))
+        rename_button = ttk.Button(button_frame, text="Rename",
+                                    command=self.rename_command)
+        rename_button.pack()
+        delete_button = ttk.Button(button_frame, text="Delete",
+                                    command=self.delete_command)
+        delete_button.pack()
+        share_button = ttk.Button(button_frame, text="Share",
+                                    command=self.share_command)
+        share_button.pack()
+        accept_button = ttk.Button(button_frame, text="Accept",
+                                    command=self.accept_command)
+        accept_button.pack()
+        
+
 
 
 
 
 root = tk.Tk()
 #init_window = InitWindow(root)
-MainWindow(root)
+ServerDsetWindow(root, title="Select Dataset", 
+                        dsets={'list':[], 'shared':[], 
+                        'requests':[], "user's shares":[]})
+#MainWindow(root)
 center_window(root)
 root.mainloop()
