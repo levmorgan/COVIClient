@@ -91,6 +91,9 @@ class MainWindow:
         center_window(init_dialog)
         root.wait_window(init_dialog)
 
+        print init.mode
+        print init.response
+
         if init.mode == 'server':
             dset_dialog = ServerDsetWindow(self.real_root,
                                             dset=init.reply,
