@@ -33,7 +33,7 @@ class NetworkThread(threading.Thread):
         if job[0] == 'connect':
             try:
                 self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                self.sock = ssl.wrap_socket(sock)
+                self.sock = ssl.wrap_socket(self.sock)
                 self.sock.set_timeout(10)
                 self.sock.connect((job[1], job[2]))
                 self.res_q.put(True)
