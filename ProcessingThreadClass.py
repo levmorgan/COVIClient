@@ -25,6 +25,12 @@ class ProcessingThread(Thread):
         self.dset_path = dset
         self.selected_cluster = None
         
+        # Set default shape and color mode
+        self.shape = 'spheres'
+        self.mode = 'heat'
+        self.shapes = itertools.cycle(['paths', "spheres"])
+        self.modes = itertools.cycle(["heat", "brightness"])
+
     def run(self):
         self.svr_socket = socket.socket(socket.AF_INET, 
                                     socket.SOCK_STREAM)
@@ -65,8 +71,8 @@ class ProcessingThread(Thread):
         print "Data chunk received"
         
         # Parse info out of the data we received 
-        num_nodes, self.surface_idcode, self.volume_idcode = re.findall(
-            """<SUMA_ixyz\n  ni_form="binary.lsbfirst"\n  ni_type="int,3\*float"\n  ni_dimen="([0-9]+?)"\n  volume_idcode="(.*?)"\n  surface_idcode="(.*?)".*""",
+        num_nodes, self.volume_idcode, self.surface_idcode, self.surface_label = re.findall(
+            """<SUMA_ixyz\n  ni_form="binary.lsbfirst"\n  ni_type="int,3\*float"\n  ni_dimen="([0-9]+?)"\n  volume_idcode="(.*?)"\n  surface_idcode="(.*?)".*\n  surface_label="(.*?)".*""",
               data, flags=re.DOTALL)[0]
         self.num_nodes = int(num_nodes) 
         
@@ -117,6 +123,9 @@ class ProcessingThread(Thread):
         'volume_idcode="%s"\n  '%(self.volume_idcode)+
         'function_idcode="%s"\n  threshold="0" />'%(self.volume_idcode))
         
+        #FIXME: Read in the surface file from disk, no time for NIDO right now
+        self.load_surface(os.path.join(os.path.split(spec_file)[0], self.surface_label)) 
+        
         # Start the main loop
         while True:
             # Alternately check the socket and command queue 
@@ -124,58 +133,8 @@ class ProcessingThread(Thread):
                 # Check for mouse clicks in SUMA 
                 dat = self.recv_data()
                 if dat:
-                    try:
-                        self.surface_nodeid, self.surface_idcode, self.surface_label = re.findall("""<SUMA_crosshair_xyz\n  ni_type="float"\n  ni_dimen="3"\n  surface_nodeid="([0-9\.]+?)"\n  surface_idcode="(.*?)"\n  surface_label="(.*?)" >""",
-                         dat, flags=re.DOTALL)[0]
-                        #TODO: Remove debug output
-                        print "surface nodeid: %s"%(self.surface_nodeid)
-                        print "surface idcode: %s"%(self.surface_idcode)
-                        print "surface label: %s"%(self.surface_label)
-                        
-                        self.surface_nodeid = int(self.surface_nodeid)
-                        selected_cluster = self.clust[self.surface_nodeid]
-                        
-                        # If a new cluster was selected, update the figure 
-                        if self.selected_cluster != selected_cluster:
-                            # Update the selected cluster
-                            self.selected_cluster = self.clust[self.surface_nodeid]
-                            # Load the appropriate matrix
-                            try:
-                                print "Starting to read stats"
-                                stat_fi = open(
-                                               os.path.join(self.dset_path,
-                                                    '%i.stat.1D'%self.clust[self.surface_nodeid]),
-                                                    'r')
-                                
-                                matrix = [float(i) for i in stat_fi]
-                                
-                                # Map nodes to correlations
-                                matrix = zip(self.draw_here, matrix)
-                                
-                                stat_fi.close()
-                                print 'Loaded matrix ok'
-                                
-                            except IOError:
-                                #TODO: Handle a file error
-                                
-                                raise
-                            
-                            clusters = [i*64 for i in xrange(self.num_nodes/64)]
-                            
-                            self.load_nido_segments_node(self.surface_nodeid, matrix)
-    #                                                     [[i, uniform(0,1)]
-#                                                         for i in clusters]) 
-                        else:
-                            print "Same cluster selected"
-                                       
-                    
-                    except IndexError:
-                        # If we didn't find the data we were looking for 
-                        # in the SUMA response, tell the user, but carry on
-                        print "Got unexpected data:"
-                        print dat
-                
-                
+                    self.last_dat = dat
+                    self.handle_mouse_click(dat)
 
             except socket.error:
                 # If the socket times out, it's no problem. Just check the queue.
@@ -184,6 +143,48 @@ class ProcessingThread(Thread):
             if not self.input_Q.empty():
                 cmd = in_queue.get_nowait()
                 self.handle_cmd(cmd)
+                
+    def handle_mouse_click(self, dat, force_update=False):
+        try:
+            self.surface_nodeid, self.surface_idcode, surface_label = re.findall("""<SUMA_crosshair_xyz\n  ni_type="float"\n  ni_dimen="3"\n  surface_nodeid="([0-9\.]+?)"\n  surface_idcode="(.*?)"\n  surface_label="(.*?)" >""", dat, flags=re.DOTALL)[0]
+            # If surface label is different, load the new surface
+            if surface_label != self.surface_label:
+                self.surface_label = surface_label
+                self.load_surface(os.path.join(os.path.split(spec_file)[0], self.surface_label))
+                print "Loaded new surface"
+            self.surface_nodeid = int(self.surface_nodeid)
+            selected_cluster = self.clust[self.surface_nodeid]
+            # If a new cluster was selected, update the figure
+            if (self.selected_cluster != selected_cluster) or force_update:
+                if not force_update:
+                    #TODO: Remove debug output
+                    print "surface nodeid: %s" % (self.surface_nodeid)
+                    print "surface idcode: %s" % (self.surface_idcode)
+                    print "surface label: %s" % (self.surface_label)
+                # Update the selected cluster
+                self.selected_cluster = self.clust[self.surface_nodeid] # Load the appropriate matrix
+                try:
+                    print "Starting to read stats"
+                    stat_fi = open(os.path.join(self.dset_path, 
+                            '%i.stat.1D' % self.clust[self.surface_nodeid]), 
+                        'r')
+                    matrix = [float(i) for i in stat_fi]
+                    # Map nodes to correlations
+                    matrix = zip(self.draw_here, matrix)
+                    stat_fi.close()
+                    print 'Loaded matrix ok'
+                except IOError:
+                    #TODO: Handle a file error
+                    raise
+                self.send_displayable_object(self.surface_nodeid, matrix)
+            else:
+                print "Same cluster selected" #                                                     [[i, uniform(0,1)]
+                    #                                                         for i in clusters])
+        except IndexError:
+            # If we didn't find the data we were looking for
+            # in the SUMA response, tell the user, but carry on
+            print "Got unexpected data:"
+            print dat
                 
 
     def recv_data(self):
@@ -270,8 +271,38 @@ class ProcessingThread(Thread):
                                                           segments[i][1],
                                                           segments[i][2])
     """
+    
+    def load_surface(self, surf_fi_name):
+        try:
+            surf_fi = open(surf_fi_name, 'r')
+            surf = surf_fi.read()
             
-    def load_nido_segments_node(self, src_node, matrix):
+            #TODO: SUpport binary surfaces
+            if not re.match("#!ascii", surf):
+                raise ValueError("Only ASCII surface files (.asc files) are currently supported")
+            else:
+                # Load an ASCII surface
+                surf = surf.split('\n')
+                num_nodes = int(surf[1].split(' ')[0])
+                # Separate out the x y z locations of nodes and 
+                # parse them to floats
+                nodes = [i.split() for i in surf[2:num_nodes+2]]
+                nodes = [[float(i) for i in node] for node in nodes]
+                self.nodes = nodes
+                
+                triangles = [i.split() for i in surf[num_nodes+2:(2*num_nodes)+2]]
+                triangles = [[int(i) for i in triangle] for triangle in triangles]
+                self.triangles = triangles
+            
+        except IOError as e:
+            #TODO: Rethink error handling
+            print "Could not open surface file: %s"%str(e)
+            sys.exit(1)
+        except ValueError as e:
+            print "Error reading surface file: %s"%str(e)
+            sys.exit(1)
+            
+    def send_displayable_object(self, src_node, matrix):
         '''
         Takes a source node and a list of nodes it's connected to. 
         Produces a displayable object node-based lines connecting the 
@@ -279,6 +310,8 @@ class ProcessingThread(Thread):
         '''
         # Valid shapes: paths, spheres (only supports heat)
         # Valid modes: brightness, heat, alpha
+        shape = self.shape
+        mode = self.mode
         shape = 'spheres'
         mode = 'heat'
         
@@ -379,11 +412,17 @@ class ProcessingThread(Thread):
             # Generate spheres
             do_file = open(self.do_file+'.1D.do', 'w')
             do_file.write("#node-based_spheres\n")
-            for i in filtered_matrix:
-                if mode == 'heat':
-                    do_file.write("%i %.3f 0.0 %.3f 1.0\n"%(i[0], 
-                                                norm(i[1]), 
-                                                1.-norm(i[1])))
+            if mode == 'nodemap':
+                for i in xrange(0,self.num_nodes,4):
+                    do_file.write("%i %.3f 0.0 %.3f 1.0\n"%(i, 
+                                                    norm(float(i)/float(self.num_nodes)), 
+                                                    1.-norm(float(i)/float(self.num_nodes))))
+            else:
+                for i in filtered_matrix:
+                    if mode == 'heat':
+                        do_file.write("%i %.3f 0.0 %.3f 1.0\n"%(i[0], 
+                                                    norm(i[1]), 
+                                                    1.-norm(i[1])))
             do_file.close()
         
         # Load the shapes into SUMA
@@ -399,6 +438,28 @@ class ProcessingThread(Thread):
         '''
         return range(3)
     
+    def redraw(self):
+        self.handle_mouse_click(self.last_dat, 
+                                force_update=True)
+    
+    def handle_input(self, inp):
+        inp = inp.strip()
+        
+        if re.match("[sS]", inp):
+            self.shape = self.shapes.next()
+            print "Switched shape to %s"%(self.shape)
+        elif re.match("[mMcC]", inp):
+            self.mode = self.modes.next()
+            print "Switched mode to %s"%(self.mode)
+            
+        # Update the graphic
+        self.redraw()
+            
+def input_loop(proc_thread):
+    print "Taking input now"
+    while True:
+        proc_thread.handle_input(raw_input())
+    
 if __name__ == '__main__':
     in_queue = Queue()
     out_queue = Queue()
@@ -412,6 +473,10 @@ if __name__ == '__main__':
     proc_thread = ProcessingThread(in_queue, out_queue, spec_file, surfvol_file, dset='test_dset')
     proc_thread.setDaemon(True)
     proc_thread.start()
+    
+    input_thread = Thread(target=input_loop(proc_thread))
+    input_thread.setDaemon(True)
+    input_thread.start()
     
     # Wait for the kill signal to exit
     signal.pause()
