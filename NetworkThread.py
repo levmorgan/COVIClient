@@ -1,6 +1,7 @@
 import ServerCommunication as sc
 import threading, socket, ssl
 from Queue import Queue
+from traceback import print_exc
 
 class NetworkThread(threading.Thread):
     def __init__(self):
@@ -10,13 +11,14 @@ class NetworkThread(threading.Thread):
 
         self.dispatch = {
             "auth":sc.auth,
-            "lst":sc.lst,
+            "list":sc.lst,
             "new_dset":sc.new_dset,
             "matrix_req":sc.matrix_req,
             "surface":sc.surface,
             "rename":sc.rename,
             "share":sc.share,
             "unshare":sc.unshare,
+            "share_response":sc.share_response,
             "copy":sc.copy,
             "copy_shared":sc.copy_shared,
             "remove":sc.remove,
@@ -24,29 +26,35 @@ class NetworkThread(threading.Thread):
             "close":sc.close,
             "rename_admin":sc.rename_admin,
             "remove_admin":sc.remove_admin,}
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.sock.settimeout(10)
+        self.sock = ssl.wrap_socket(self.sock)
+        self.setDaemon(True)
  
 
     def run(self):
-        # Take a job off the job queue, 
-        # blocking if it's empty
-        job = self.job_q.get()
-        if job[0] == 'connect':
-            try:
-                self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                self.sock = ssl.wrap_socket(sock)
-                self.sock.set_timeout(10)
-                self.sock.connect((job[1], job[2]))
-                self.res_q.put(True)
-            except Exception as e:
-                self.res_q.put(e)
-            finally:
-                return
-
-        try:
-            res = self.dispatch[job[0]](self.sock, *job[1:])
-        except Exception as e:
-            res = e
-        self.res_q.put(res)
-        self.job_q.task_done()
+        while True:
+            # Take a job off the job queue, 
+            # blocking if it's empty
+            job = self.job_q.get()
+            if job[0] == 'connect':
+                try:
+                    self.sock.connect((job[1], job[2]))
+                    print "Connected OK"
+                    self.res_q.put(True)
+                except Exception as e:
+                    print "Could not connect"
+                    print_exc()
+                    self.res_q.put(e)
+                    continue
+            else:
+                try:
+                    res = self.dispatch[job[0]](self.sock, *job[1:])
+                except Exception as e:
+#                    print "Could not execute job"
+#                    print_exc()
+                    res = e
+                self.res_q.put(res)
+                self.job_q.task_done()
 
         

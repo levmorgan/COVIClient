@@ -1,8 +1,10 @@
 import Tkinter as tk
 import ttk
-import tkFileDialog, tkMessageBox, re
-from tkSimpleDialog import Dialog
+import tkFileDialog, tkMessageBox, re, socket
+import tkSimpleDialog
+from tkCustomDialog import Dialog
 from NetworkThread import NetworkThread
+from traceback import print_exc
 
 def is_error(obj):
     return isinstance(obj, Exception)
@@ -12,7 +14,7 @@ def valid_dset(dset):
     Check to see whether a directory is a valid COVI dataset
     '''
     # TODO: Finish valid_dset
-    print dset
+#    print dset
     return True
 
 def set_state(widget, state='disabled'):
@@ -68,6 +70,22 @@ def center_window(window):
     # Show
     window.deiconify()
 
+def handle_net_response(res, msg):
+    '''
+    Handle a response from the network thread. Display an error 
+    message & return false if it's an error. Return the response
+    otherwise.
+    '''
+    if is_error(res):
+#        print "%s is an error."%(str(res))
+        tkMessageBox.showwarning("Problem During %s"%msg,
+#                                        response.message)
+                                str(res[1]))
+        return False
+    else: 
+#        print "%s is not an error."%(str(res))
+        return res
+
 class MainWindow:
     def __init__(self, real_root):
         # Set up a network thread
@@ -78,7 +96,8 @@ class MainWindow:
         self.root = ttk.Frame(real_root)
         root = self.root
         root.pack()
-        rootlabel = ttk.Label(root, text="Fakey fake")
+        rootlabel = ttk.Label(root, 
+            text="I'm the main window!\nWhen I grow up, I'll be full of widgets!")
         rootlabel.pack()
         center_window(real_root)
 
@@ -91,14 +110,13 @@ class MainWindow:
         center_window(init_dialog)
         root.wait_window(init_dialog)
 
-        print init.mode
-        print init.response
+#        print init.mode
 
         if init.mode == 'server':
             dset_dialog = ServerDsetWindow(self.real_root,
-                                            dset=init.reply,
                                             net_thread=self.net_thread,)
-            root.wait_window(dset_dialog)
+#            center_window(dset_dialog)
+#            root.wait_window(dset_dialog)
         
 
 
@@ -136,7 +154,6 @@ class InitWindow:
                                 command=self.radio_command)
         server_radio.pack(anchor=tk.W)
         server_frame.pack(anchor=tk.W)
-        print len(server_radio.winfo_children())
 
         client_radio = ttk.Radiobutton(root, text="Local Dataset",
                                 variable=self.radio_var,
@@ -149,6 +166,7 @@ class InitWindow:
         # Create the server connection frame
         # Create tk variables to hold info about the server connection
         self.addr_var = tk.StringVar()
+        self.addr_var.set(socket.gethostname())
         self.port_var = tk.IntVar()
         self.port_var.set(14338)
         self.user_var = tk.StringVar()
@@ -226,6 +244,10 @@ class InitWindow:
         self.real_root.bind("<Return>", self.ok_command)
    
     def radio_command(self):
+        '''
+        Enable either the server controls or dataset selection controls,
+        depending on what radio button was clicked
+        '''
         if self.radio_var.get() == 0:
             set_state(self.server_frame, state='enabled')
             set_state(self.local_frame)
@@ -279,26 +301,32 @@ class InitWindow:
             return
             
         if self.radio_var.get() == 0:
-            # Get data from a server
-            # Authenticate with the server
-            print "Adding job"
+            # MODE: Get data from a server
+            # Connect to the server
             self.net_thread.job_q.put(
-                ['auth', self.user_var, self.pass_var])
-            # TODO: start a progress bar
-            print "Trying to get response"
-            response = self.net_thread.res_q.get()
-            self.response = response
-            print self.response
-            
-            if is_error(response):
-                tkMessageBox.showwarning("Problem During Authentication",
-                                        response.message)
-                set_state(self.root, state='enabled')
-                # TODO: stop progress bar
+                ['connect', self.addr_var.get(), int(self.port_var.get())])
+            # TODO: start an animation
+            res = self.net_thread.res_q.get(block=True, timeout=5)
+            # TODO: stop animation
+            res = handle_net_response(res, "Connection")
+            if not res:
                 return
+            
+            
+            # Authenticate with the server
+            print "Trying to auth"
+            self.net_thread.job_q.put(
+                ['auth', self.user_var.get(), self.pass_var.get()])
+            # TODO: start an animation
+            print "Got auth response"
+            res = self.net_thread.res_q.get(True, 5)
+            # TODO: stop animation
+            res = handle_net_response(res, "Authentication")
+            if not res:
+                return
+            
             self.mode = 'server'
             
-            pass
         elif self.radio_var.get() == 1:
             # TODO: Go into local dataset mode
             self.mode = 'local'
@@ -307,22 +335,164 @@ class InitWindow:
         self.real_root.destroy()
 
 class ServerDsetWindow(Dialog):
-
+    '''
+    A dialog to select and modify datasets on the server
+    
+    TODO:
+        rename_command: Dialog box w/text input
+        delete_command: Confirmation dialog
+        share_command: text input dialog
+        accept_command: confirmation dialog
+    '''
     
     def rename_command(self):
-        pass
+        item = self.tree.selection()[0]
+        item_details = self.tree.item(item)
+        parent = self.tree.parent(item)
+        
+        # If this is a valid item to rename, rename it
+        if (parent and parent != 'requests' and 
+            item_details['text'] != 'None' and parent != 'shared'):
+            new = tkSimpleDialog.askstring("Rename a dataset", 
+                                           "Input the new name for dataset %s."%item)
+            if not new:
+                return
+            
+            self.net_thread.job_q.put_nowait(["rename", item, new])
+            
+            #Make sure the rename succeeded
+            #TODO: Start and stop animation
+            res = self.net_thread.res_q.get(True, 5)
+            handle_net_response(res, "Rename")
+            if res:
+                self.update_tree()
+            
+        elif parent == 'shared':
+            tkMessageBox.showinfo("Can't rename dataset", 
+                                  "You can only rename valid datasets that you own.")
+            
     
     
     def delete_command(self):
-        pass
-    
+        item = self.tree.selection()[0]
+        item_details = self.tree.item(item)
+        parent = self.tree.parent(item)
+        
+        # If this is a valid item to delete, delete it
+        if parent == 'list':
+            self.net_thread.job_q.put_nowait(["remove", item])
+            
+        elif parent == 'shared':
+            owner, dset = re.findall("share(.*?)/(.*)", item)[0]
+            self.net_thread.job_q.put_nowait(["remove_shared", dset, owner])
+            
+        elif parent == "user's shares":
+            recipient, dset = re.findall("usrs(.*?)/(.*)", item)[0]
+            self.net_thread.job_q.put_nowait(["unshare", dset, recipient])
+        
+        elif parent == "requests":
+            owner, dset = re.findall("req(.*?)/(.*)", item)[0]
+            self.net_thread.job_q.put_nowait(["share_response", dset, owner, 0])
+        #TODO: Start and stop animation
+        res = self.net_thread.res_q.get(True, 5)
+        handle_net_response(res, "Deletion")
+        if res:
+            self.update_tree()
     
     def share_command(self):
-        pass
+        item = self.tree.selection()[0]
+        item_details = self.tree.item(item)
+        parent = self.tree.parent(item)
+        
+        if parent == "list":
+            recipient = tkSimpleDialog.askstring("Share a Dataset", 
+                "Which user would you like to share %s with?"%item)
+            if recipient:
+                self.net_thread.job_q.put_nowait(["share", item, recipient, 0])
+        else:
+            return
+        #TODO: Add re-sharing of shared datasets
+        
+        #TODO: Start and stop animation
+        res = self.net_thread.res_q.get(True, 5)
+        handle_net_response(res, "Sharing")
+        if res:
+            self.update_tree()
     
     
     def accept_command(self):
-        pass
+        item = self.tree.selection()[0]
+        item_details = self.tree.item(item)
+        parent = self.tree.parent(item)
+        
+        if parent == "requests":
+            owner, dset = re.findall("req(.*?)/(.*)", item)[0]
+            self.net_thread.job_q.put_nowait(["share_response", dset, owner, 1])
+            #TODO: Start and stop animation
+            res = self.net_thread.res_q.get(True, 5)
+            handle_net_response(res, "Response Acceptance")
+            if res:
+                self.update_tree()
+        else:
+            tkMessageBox.showwarning("Can't Accept Request", 
+                                     "%s is not a share request."%item)
+            
+    
+    def update_tree(self):
+        tree = self.tree
+        
+        # Clear out any children in the tree
+        [self.tree.delete(i)
+         for i in self.tree.get_children()]
+         
+        # Get a list of datasets to populate the tree
+        self.net_thread.job_q.put(['list'])
+        # TODO: start animation
+        res = self.net_thread.res_q.get()
+        # TODO: stop animation
+        handle_net_response(res, "Dataset Retrieval")
+        if not res:
+            return
+        try:
+            # Try to parse out the dataset list
+            dsets = res
+        except KeyError:
+            # TODO: create a real error message
+            print "Could not get datasets! Key Error!"
+            print "res: ",
+            print res
+            dsets = {'list':[], 'shared':[], 'requests':[], "user's shares":[]} 
+        
+        # Insert nodes into the tree
+        tree.insert('', 'end', 'list',
+                    text='Your Datasets')
+        # Sort the lists of datasets
+        [dsets[i].sort() for i in dsets if type(dsets[i]) == list]
+
+        for i in dsets['list']:
+            tree.insert('list', 'end', i, text=i)
+
+        tree.insert('', 'end', 'shared', 
+                    text="Shared with you")
+        for i in dsets['shared']:
+            tree.insert('shared', 'end', 'share'+i[0]+'/'+i[2],
+                        text='Owner: %s\n%s'%(i[0], i[2]))
+
+        tree.insert('', 'end', 'requests', 
+                    text="Share Requests")
+        for i in dsets['requests']:
+            tree.insert('requests', 'end', 'req'+i[0]+'/'+i[2],
+                        text='From: %s\n%s'%(i[0], i[2]))
+
+        tree.insert("", "end", "user's shares", 
+                    text="Shared by you")
+        for i in dsets["user's shares"]:
+            tree.insert("user's shares", "end", 'usrs'+i[0]+"/"+i[2],
+                        text="To: %s\n%s"%(i[0], i[2]))
+
+        # Insert 'None' nodes in empty categories
+        [tree.insert(i, "end", i+"none", text="None") for i in dsets
+            if not dsets[i]]
     
     
     def body(self, root, **kwargs):
@@ -331,49 +501,18 @@ class ServerDsetWindow(Dialog):
         with the datasets on the server and share requests, and the
         relevant buttons.
 
-        args should be the body of a list response, documented in 
-            sendable-json.json
+        kwargs should be:
+            net_thread=a NetworkThread object
         '''
         self.root = root
         self.net_thread = kwargs['net_thread']
-        center_window(self)
-        tree = ttk.Treeview(root, selectmode='browse',
+        
+        self.tree = ttk.Treeview(root, selectmode='browse',
                             show="tree")
         
-        # Insert nodes into the tree
-        if 'dsets' in kwargs:
-            dsets = kwargs['dsets']
-            tree.insert('', 'end', 'list',
-                        text='Your Datasets')
-            # Sort the lists of datasets
-            [dsets[i].sort() for i in dsets]
-
-            for i in dsets['list']:
-                tree.insert('list', 'end', i, text=i)
-
-            tree.insert('', 'end', 'shared', 
-                        text="Shared with you")
-            for i in dsets['shared']:
-                tree.insert('shared', 'end', 'share'+i[0]+'/'+i[2],
-                            text='Owner: %s\n%s'%(i[0], i[2]))
-
-            tree.insert('', 'end', 'requests', 
-                        text="Share Requests")
-            for i in dsets['requests']:
-                tree.insert('requests', 'end', 'req'+i[0]+'/'+i[2],
-                            text='From: %s\n%s'%(i[0], i[2]))
-
-            tree.insert("", "end", "user's shares", 
-                        text="Shared by you")
-            for i in dsets["user's shares"]:
-                tree.insert("user's shares", "end", 'usrs'+i[0]+"/"+i[2],
-                            text="To: %s\n%s"%(i[0], i[2]))
-
-            # Insert 'None' nodes in empty categories
-            [tree.insert(i, "end", i+"none", text="None") for i in dsets
-                if not dsets[i]]
-
-        tree.pack(anchor=tk.W, side=tk.LEFT)
+        # Update self.tree with dataset information
+        self.update_tree()
+        self.tree.pack(anchor=tk.W, side=tk.LEFT)
 
         button_frame = tk.Frame(root)
         button_frame.pack(anchor=tk.E, padx=(5,0))
@@ -390,18 +529,22 @@ class ServerDsetWindow(Dialog):
                                     command=self.accept_command)
         accept_button.pack()
         
+        refresh_button = ttk.Button(button_frame, text="Refresh",
+                                    command=self.update_tree)
+        refresh_button.pack()
+        
 
 
 
-
-
-root = tk.Tk()
-#init_window = InitWindow(root)
-'''
-ServerDsetWindow(root, title="Select Dataset", 
-                        dsets={'list':[], 'shared':[], 
-                        'requests':[], "user's shares":[]})
-                        '''
-MainWindow(root)
-center_window(root)
-root.mainloop()
+if __name__ == '__main__':
+    root = tk.Tk()
+    #init_window = InitWindow(root)
+    '''
+    ServerDsetWindow(root, title="Select Dataset", 
+                            dsets={'list':[], 'shared':[], 
+                            'requests':[], "user's shares":[]})
+                            '''
+    MainWindow(root)
+    center_window(root)
+    root.v = True
+    root.mainloop()

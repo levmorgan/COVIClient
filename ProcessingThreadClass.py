@@ -1,4 +1,4 @@
-'''
+'''path
 Created on Nov 28, 2012
 
 @author: morganl
@@ -26,10 +26,10 @@ class ProcessingThread(Thread):
         self.selected_cluster = None
         
         # Set default shape and color mode
-        self.shape = 'spheres'
+        self.shape = 'sized spheres'
         self.mode = 'heat'
-        self.shapes = itertools.cycle(['paths', "spheres"])
-        self.modes = itertools.cycle(["heat", "brightness"])
+        self.shapes = itertools.cycle(['paths', "spheres", "sized spheres"])
+        self.modes = itertools.cycle(["brightness", "heat"])
 
     def run(self):
         self.svr_socket = socket.socket(socket.AF_INET, 
@@ -185,6 +185,7 @@ class ProcessingThread(Thread):
             # in the SUMA response, tell the user, but carry on
             print "Got unexpected data:"
             print dat
+            raise
                 
 
     def recv_data(self):
@@ -293,6 +294,15 @@ class ProcessingThread(Thread):
                 triangles = [i.split() for i in surf[num_nodes+2:(2*num_nodes)+2]]
                 triangles = [[int(i) for i in triangle] for triangle in triangles]
                 self.triangles = triangles
+                
+                # Get mins and maxes of x,y,z for coloring
+                x = [i[0] for i in nodes]
+                y = [i[1] for i in nodes]
+                z = [i[2] for i in nodes]
+                
+                self.x_range = max(x)-min(x)
+                self.y_range = max(y)-min(y)
+                self.z_range = max(z)-min(z) 
             
         except IOError as e:
             #TODO: Rethink error handling
@@ -302,6 +312,32 @@ class ProcessingThread(Thread):
             print "Error reading surface file: %s"%str(e)
             sys.exit(1)
             
+    def color_data(self, filtered_matrix):
+        '''
+        Given a list of nodes and their correlations,
+        make a list of nodes and RGBA values given the current coloring mode
+        '''
+        # Normalize a value self.threshold<=t<=1 to 0<=t<=1
+        norm = lambda x, t=self.threshold: (x+t-1.)/t
+        
+        if self.mode == 'heat':
+            colored = [(i[0], norm(i[1]), 0., 1.-norm(i[1]), 1.) for i in filtered_matrix]
+        
+        if self.mode == 'brightness':
+            colored = range(len(filtered_matrix))
+            for i in xrange(len(filtered_matrix)):
+                node = filtered_matrix[i][0]
+                corr = filtered_matrix[i][1]
+                x, y, z, w = self.nodes[node]
+                colored[i] = (node, (x/self.x_range)*corr, 
+                              (y/self.y_range)*corr, 
+                              (z/self.z_range)*corr, 1.0)
+            
+            
+        
+        return colored
+                
+    
     def send_displayable_object(self, src_node, matrix):
         '''
         Takes a source node and a list of nodes it's connected to. 
@@ -312,8 +348,8 @@ class ProcessingThread(Thread):
         # Valid modes: brightness, heat, alpha
         shape = self.shape
         mode = self.mode
-        shape = 'spheres'
-        mode = 'heat'
+#        shape = 'spheres'
+#        mode = 'heat'
         
         # Function to normalize thresholded values
         self.threshold = 0.5
@@ -321,7 +357,7 @@ class ProcessingThread(Thread):
         norm = lambda x, t=self.threshold: (x+t-1.)/t
         # TODO: Make path generation use filtered_matrix
         filtered_matrix = [i for i in matrix if i[1] > self.threshold] 
-        
+        colored = self.color_data(filtered_matrix)
         
         if os.path.exists(self.do_file):
                 os.remove(self.do_file)
@@ -418,11 +454,20 @@ class ProcessingThread(Thread):
                                                     norm(float(i)/float(self.num_nodes)), 
                                                     1.-norm(float(i)/float(self.num_nodes))))
             else:
-                for i in filtered_matrix:
-                    if mode == 'heat':
-                        do_file.write("%i %.3f 0.0 %.3f 1.0\n"%(i[0], 
-                                                    norm(i[1]), 
-                                                    1.-norm(i[1])))
+                for i in colored:
+                    do_file.write("%i %.3f %.3f %.3f %.3f\n"%(i))
+            do_file.close()
+            
+        elif shape == 'sized spheres':
+            # Generate spheres
+            do_file = open(self.do_file+'.1D.do', 'w')
+            do_file.write("#node-based_spheres\n")
+            for j in xrange(len(colored)):
+                i = colored[j]
+                corr = filtered_matrix[j][1]
+                do_file.write("%i %.3f %.3f %.3f %.3f %.3f\n"%(i[0], i[1], i[2], 
+                                                               i[3], i[4], 2.*corr))
+
             do_file.close()
         
         # Load the shapes into SUMA

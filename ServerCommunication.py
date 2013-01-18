@@ -221,16 +221,31 @@ def rename(sock, old, new):
                              "new":new } }
     return simple_request(sock, req, method)
 
-def share(sock, dset, recipient, can_share):
+def share(sock, dset, recipient, response):
     method = "Share"
-    if (can_share != 0) and (can_share != 1):
-        raise ValueError("can_share must be 0 or 1, not %s"%(str(can_share))) 
+    if (response != 0) and (response != 1):
+        raise ValueError("response must be 0 or 1, not %s"%(str(response))) 
     req = { "covi-request": { 
                              "type":"share", 
                              "dset":dset, 
                              "recipient":recipient, 
-                             "can share":can_share } }
+                             "can share":response } }
     return simple_request(sock, req, method)
+
+def share_response(sock, dset, owner, response):
+    '''
+    Accept or reject a share request from another user
+    '''
+    method = "Share response"
+    if (response != 0) and (response != 1):
+        raise ValueError("response must be 0 or 1, not %s"%(str(response))) 
+    req = { "covi-request": { 
+                             "type":"share response", 
+                             "dset":dset, 
+                             "owner":owner, 
+                             "response":response } }
+    return simple_request(sock, req, method)
+    
 
 def unshare(sock, dset, recipient):
     method = "Unshare"
