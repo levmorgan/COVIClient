@@ -128,15 +128,49 @@ class MainWindow:
             else:
                 return
         
+class NetworkDialog(object):
+    def recv_response(self, expected="req ok"):
+        '''
+        Get the response from the server, handling missing or incorrect responses
+        '''
+        res = self.net_thread.res_q.get(True, 5)
+        wait = True
+        while wait and not res:
+            try:
+                res = self.net_thread.res_q.get(True, 5)
+                wait = False
+            except Empty:
+                wait = tkMessageBox.askyesno("Network Issue", 
+                                      "The response from the server is"+
+                                      " taking longer than expected. "+
+                                      "Continue waiting?")
+                
+        # If the request is the wrong type, just throw it out
+        # and try to find the right response
+        
+        #If we're expecting req_ok, res will just be True
+        while (# If the queue is empty, don't try to get anything 
+               not self.net_thread.res_q.empty() and
+               ((not (expected == "req ok") and (res == True))
+                # Otherwise, check the response type  
+                or ('type' in res and res['type'] != expected))):
+            if res:
+                tkMessageBox.showinfo("Unexpected data from the server", 
+                                      "COVI got an unexpected %s response from the server. It's "+
+                                      "probably nothing to worry about.")
+                print res
+            res = self.net_thread.res_q.get_nowait()
+        
+        return res
 
 
-
-class InitWindow:
+class InitWindow(NetworkDialog):
     def __init__(self, real_root, net_thread):
         '''
         Create a window that allows a user to log in to a server 
         or to load a local dataset
         '''
+        super(InitWindow, self).__init__()
         self.net_thread = net_thread
         self.real_root = real_root
         self.root = ttk.Frame(real_root)
@@ -316,7 +350,7 @@ class InitWindow:
             self.net_thread.job_q.put(
                 ['connect', self.addr_var.get(), int(self.port_var.get())])
             # TODO: start an animation
-            res = self.net_thread.res_q.get(block=True, timeout=5)
+            res = self.recv_response()
             # TODO: stop animation
             res = handle_net_response(res, "Connection")
             if not res:
@@ -329,7 +363,7 @@ class InitWindow:
                 ['auth', self.user_var.get(), self.pass_var.get()])
             # TODO: start an animation
             print "Got auth response"
-            res = self.net_thread.res_q.get(True, 5)
+            res = self.recv_response()
             # TODO: stop animation
             res = handle_net_response(res, "Authentication")
             if not res:
@@ -344,9 +378,10 @@ class InitWindow:
         tkMessageBox.showinfo("Radical!", "You hit OK! Way to go!")
         self.real_root.destroy()
 
-class ServerDsetWindow(Dialog):
+class ServerDsetWindow(Dialog, NetworkDialog):
+    #TODO: Handle broken pipe
     '''
-    A dialog to select and modify datasets on the server
+    A dialog to load and modify datasets on the server
     
     TODO:
         rename_command: Dialog box w/text input
@@ -372,7 +407,7 @@ class ServerDsetWindow(Dialog):
             
             #Make sure the rename succeeded
             #TODO: Start and stop animation
-            res = self.net_thread.res_q.get(True, 5)
+            res = self.recv_response()
             handle_net_response(res, "Rename")
             if res:
                 self.update_tree()
@@ -393,21 +428,57 @@ class ServerDsetWindow(Dialog):
             self.net_thread.job_q.put_nowait(["remove", item])
             
         elif parent == 'shared':
-            owner, dset = re.findall("share(.*?)/(.*)", item)[0]
+            owner, dset = item_details['values']
             self.net_thread.job_q.put_nowait(["remove_shared", dset, owner])
             
         elif parent == "user's shares":
-            recipient, dset = re.findall("usrs(.*?)/(.*)", item)[0]
+            recipient, dset = item_details['values']
             self.net_thread.job_q.put_nowait(["unshare", dset, recipient])
         
         elif parent == "requests":
-            owner, dset = re.findall("req(.*?)/(.*)", item)[0]
+            owner, dset = item_details['values']
             self.net_thread.job_q.put_nowait(["share_response", dset, owner, 0])
         #TODO: Start and stop animation
-        res = self.net_thread.res_q.get(True, 5)
+        res = self.recv_response()
         handle_net_response(res, "Deletion")
         if res:
             self.update_tree()
+    
+    def copy_command(self):
+        item = self.tree.selection()[0]
+        item_details = self.tree.item(item)
+        parent = self.tree.parent(item)
+        
+        if parent == "list" or parent == "shared":
+            new = tkSimpleDialog.askstring("Copy a Dataset", 
+                "What should the new dataset's name be?")
+            
+            # If the user cancelled, return
+            if not new:
+                return
+            
+            #TODO: Start and stop animation
+            if parent == "list":
+                self.net_thread.job_q.put_nowait(
+                    ["copy", item, new])
+            else:
+                owner, old = item_details['values'] 
+                self.net_thread.job_q.put_nowait(
+                    ["copy_shared", old, new, owner])
+            
+            # TODO: Start an animation
+            wait = True
+            res = self.recv_response()
+            handle_net_response(res, "Copying")
+            self.update_tree()
+            
+            res = ''
+            
+            if res:
+                handle_net_response(res, "Copying")
+            
+            
+            
     
     def share_command(self):
         item = self.tree.selection()[0]
@@ -424,7 +495,7 @@ class ServerDsetWindow(Dialog):
         #TODO: Add re-sharing of shared datasets
         
         #TODO: Start and stop animation
-        res = self.net_thread.res_q.get(True, 5)
+        res = self.recv_response()
         handle_net_response(res, "Sharing")
         if res:
             self.update_tree()
@@ -436,10 +507,10 @@ class ServerDsetWindow(Dialog):
         parent = self.tree.parent(item)
         
         if parent == "requests":
-            owner, dset = re.findall("req(.*?)/(.*)", item)[0]
+            owner, dset = item_details['values']
             self.net_thread.job_q.put_nowait(["share_response", dset, owner, 1])
             #TODO: Start and stop animation
-            res = self.net_thread.res_q.get(True, 5)
+            res = self.recv_response()
             handle_net_response(res, "Response Acceptance")
             if res:
                 self.update_tree()
@@ -447,10 +518,85 @@ class ServerDsetWindow(Dialog):
             tkMessageBox.showwarning("Can't Accept Request", 
                                      "%s is not a share request."%item)
             
+    def info_command(self):
+        item = self.tree.selection()[0]
+        item_details = self.tree.item(item)
+        parent = self.tree.parent(item)
+        
+        print "Item: ",
+        print item
+        print "Item details: "
+        print item_details
+        print "Parent: "
+        print parent
+            
+    def TreeviewSelect_command(self, event):
+        item = self.tree.selection()[0]
+        item_details = self.tree.item(item)
+        parent = self.tree.parent(item)
+        
+        if item_details['text'] == 'None' or parent == '':
+            set_state(self.button_frame, 'disabled')
+            set_state(self.refresh_button, 'enabled')
+            return
+        
+        set_state(self.button_frame, 'enabled')
+        
+        
+        if parent != 'list':
+            set_state(self.share_button, 'disabled')
+            set_state(self.rename_button, 'disabled')
+            
+        if parent != "list" and parent != 'shared':
+            set_state(self.copy_button, 'disabled')
+        
+        if parent != "requests":
+            set_state(self.accept_button, 'disabled')    
+        
+    def apply(self):
+        '''
+        Called when Ok is pressed. Load the selected dataset
+        '''
+        item = self.tree.selection()[0]
+        item_details = self.tree.item(item)
+        parent = self.tree.parent(item)
+        
+        # If a valid dataset is selected, store which it is so the main window
+        # can load it
+        if (parent == 'list' or parent == 'shared' and 
+            item_details['text'] != "None"):
+            if parent == 'shared':
+                self.dset = item_details['values']
+            else:
+                self.dset = item
+        
+        
+        
+    def sortby(self, tree, col, descending):
+        '''
+        sort tree contents when a column header is clicked on
+        
+        from: 
+        http://www.daniweb.com/software-development/python/threads/350266/creating-table-in-python
+        '''
+        
+        # TODO: Re-implement
+        
+        # grab values to sort
+        data = [(tree.set(child, col), child) \
+            for child in tree.get_children('')]
+        # if the data to be sorted is numeric change to float
+        #data =  change_numeric(data)
+        # now sort the data in place
+        data.sort(reverse=descending)
+        for ix, item in enumerate(data):
+            tree.move(item[1], '', ix)
+        # switch the heading so it will sort in the opposite direction
+        tree.heading(col, command=lambda col=col: self.sortby(tree, col, \
+            int(not descending)))
     
     def update_tree(self):
         tree = self.tree
-        
         # Clear out any children in the tree
         [self.tree.delete(i)
          for i in self.tree.get_children()]
@@ -458,7 +604,7 @@ class ServerDsetWindow(Dialog):
         # Get a list of datasets to populate the tree
         self.net_thread.job_q.put(['list'])
         # TODO: start animation
-        res = self.net_thread.res_q.get()
+        res = self.recv_response('list')
         # TODO: stop animation
         handle_net_response(res, "Dataset Retrieval")
         if not res:
@@ -466,6 +612,11 @@ class ServerDsetWindow(Dialog):
         try:
             # Try to parse out the dataset list
             dsets = res
+                
+            # If the queue is empty and we didn't get a response
+            if not res:
+                raise KeyError
+                
         except KeyError:
             # TODO: create a real error message
             print "Could not get datasets! Key Error!"
@@ -485,20 +636,20 @@ class ServerDsetWindow(Dialog):
         tree.insert('', 'end', 'shared', 
                     text="Shared with you")
         for i in dsets['shared']:
-            tree.insert('shared', 'end', 'share'+i[0]+'/'+i[2],
-                        text='Owner: %s\n%s'%(i[0], i[2]))
+            tree.insert('shared', 'end', values=(i[0], i[2]),
+                        text=i[2])
 
         tree.insert('', 'end', 'requests', 
                     text="Share Requests")
         for i in dsets['requests']:
-            tree.insert('requests', 'end', 'req'+i[0]+'/'+i[2],
-                        text='From: %s\n%s'%(i[0], i[2]))
+            tree.insert('requests', 'end', values=(i[0], i[2]),
+                        text=i[2])
 
         tree.insert("", "end", "user's shares", 
                     text="Shared by you")
         for i in dsets["user's shares"]:
-            tree.insert("user's shares", "end", 'usrs'+i[0]+"/"+i[2],
-                        text="To: %s\n%s"%(i[0], i[2]))
+            tree.insert("user's shares", "end", values=(i[1], i[2]),
+                        text=i[2])
 
         # Insert 'None' nodes in empty categories
         [tree.insert(i, "end", i+"none", text="None") for i in dsets
@@ -517,31 +668,62 @@ class ServerDsetWindow(Dialog):
         self.root = root
         self.net_thread = kwargs['net_thread']
         
+        self.tree_columns = ["From/To"]
+        
         self.tree = ttk.Treeview(root, selectmode='browse',
-                            show="tree")
+                            columns=self.tree_columns, #show="tree",
+                            displaycolumns=self.tree_columns,
+                            )
+        # TODO: Re-implement 
+        # Column formatting from
+        # http://www.daniweb.com/software-development/python/threads/350266/creating-table-in-python
+        for col in self.tree_columns:
+            self.tree.heading(col, text=col.title(),
+                command=lambda c=col: self.sortby(self.tree, c, 0))
+            # adjust the column's width to the header string
+            self.tree.column(col,
+                width=tkFont.Font().measure(col.title()))
         
         # Update self.tree with dataset information
         self.update_tree()
         self.tree.pack(anchor=tk.W, side=tk.LEFT)
+        self.bind("<<TreeviewSelect>>", self.TreeviewSelect_command)
 
-        button_frame = tk.Frame(root)
-        button_frame.pack(anchor=tk.E, padx=(5,0))
-        rename_button = ttk.Button(button_frame, text="Rename",
-                                    command=self.rename_command)
-        rename_button.pack()
-        delete_button = ttk.Button(button_frame, text="Delete",
-                                    command=self.delete_command)
-        delete_button.pack()
-        share_button = ttk.Button(button_frame, text="Share",
-                                    command=self.share_command)
-        share_button.pack()
-        accept_button = ttk.Button(button_frame, text="Accept",
-                                    command=self.accept_command)
-        accept_button.pack()
+        self.button_frame = tk.Frame(root)
+        self.button_frame.pack(anchor=tk.E, padx=(5,0))
+        button_frame = self.button_frame
+        self.rename_button = ttk.Button(button_frame, text="Rename",
+                                    command=self.rename_command, 
+                                    state='disabled')
         
-        refresh_button = ttk.Button(button_frame, text="Refresh",
+        self.rename_button.pack()
+        self.delete_button = ttk.Button(button_frame, text="Delete",
+                                    command=self.delete_command, 
+                                    state='disabled')
+        self.delete_button.pack()
+        self.copy_button = ttk.Button(button_frame, text="Copy",
+                                      command=self.copy_command,
+                                      state='disabled')
+        self.copy_button.pack()
+        self.share_button = ttk.Button(button_frame, text="Share",
+                                    command=self.share_command, 
+                                    state='disabled')
+        self.share_button.pack()
+        self.accept_button = ttk.Button(button_frame, text="Accept",
+                                    command=self.accept_command, 
+                                    state='disabled')
+        self.accept_button.pack()
+        
+        self.refresh_button = ttk.Button(button_frame, text="Refresh",
                                     command=self.update_tree)
-        refresh_button.pack()
+        self.refresh_button.pack()
+        
+        #TODO: Remove info button
+        self.info_button = ttk.Button(button_frame, text="Info",
+                                    command=self.info_command)
+        self.info_button.pack()
+        
+    
         
 
 
