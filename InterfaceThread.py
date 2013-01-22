@@ -6,6 +6,7 @@ from tkCustomDialog import Dialog
 from NetworkThread import NetworkThread
 import tkFont
 from Queue import Empty
+from collections import defaultdict
 
 def is_error(obj):
     return isinstance(obj, Exception)
@@ -129,6 +130,7 @@ class MainWindow:
                 return
         
 class NetworkDialog(object):
+    #TODO: Test data validation
     def recv_response(self, expected="req ok"):
         '''
         Get the response from the server, handling missing or incorrect responses
@@ -144,22 +146,24 @@ class NetworkDialog(object):
                                       "The response from the server is"+
                                       " taking longer than expected. "+
                                       "Continue waiting?")
-                
-        # If the request is the wrong type, just throw it out
-        # and try to find the right response
-        
-        #If we're expecting req_ok, res will just be True
-        while (# If the queue is empty, don't try to get anything 
-               not self.net_thread.res_q.empty() and
-               ((not (expected == "req ok") and (res == True))
-                # Otherwise, check the response type  
-                or ('type' in res and res['type'] != expected))):
-            if res:
+        if wait == False:
+            return False
+
+        while True:
+            # Validate the response
+            if expected == 'req ok' and res == True:
+                break
+            elif res['type'] == expected:
+                break
+            else:
                 tkMessageBox.showinfo("Unexpected data from the server", 
-                                      "COVI got an unexpected %s response from the server. It's "+
+                                      "COVI got an unexpected response from the server. It's "+
                                       "probably nothing to worry about.")
-                print res
-            res = self.net_thread.res_q.get_nowait()
+                # If the data isn't valid and there isn't any more, return False
+                if self.net_thread.res_q.empty():
+                    return False
+                
+                res = self.net_thread.res_q.get_nowait()
         
         return res
 
@@ -423,20 +427,31 @@ class ServerDsetWindow(Dialog, NetworkDialog):
         item_details = self.tree.item(item)
         parent = self.tree.parent(item)
         
+        ask = lambda x: tkMessageBox.askyesno("Delete dataset", 
+                        "Are you sure you want to delete %s?"%x)
+        
         # If this is a valid item to delete, delete it
         if parent == 'list':
+            if not ask(item):
+                return
             self.net_thread.job_q.put_nowait(["remove", item])
             
         elif parent == 'shared':
             owner, dset = item_details['values']
+            if not ask('/'.join([owner, dset])):
+                return
             self.net_thread.job_q.put_nowait(["remove_shared", dset, owner])
             
         elif parent == "user's shares":
             recipient, dset = item_details['values']
+            if not ask('/'.join([recipient, dset])):
+                return
             self.net_thread.job_q.put_nowait(["unshare", dset, recipient])
         
         elif parent == "requests":
             owner, dset = item_details['values']
+            if not ask('request '+'/'.join([owner, dset])):
+                return
             self.net_thread.job_q.put_nowait(["share_response", dset, owner, 0])
         #TODO: Start and stop animation
         res = self.recv_response()
@@ -597,6 +612,13 @@ class ServerDsetWindow(Dialog, NetworkDialog):
     
     def update_tree(self):
         tree = self.tree
+        
+        children = tree.get_children()
+        # Store which categories are expanded in the tree
+        visible = defaultdict(lambda: False, 
+                              ((i, bool(tree.item(i)['open'])) for i in children))
+        print visible
+        
         # Clear out any children in the tree
         [self.tree.delete(i)
          for i in self.tree.get_children()]
@@ -631,22 +653,26 @@ class ServerDsetWindow(Dialog, NetworkDialog):
         [dsets[i].sort() for i in dsets if type(dsets[i]) == list]
 
         for i in dsets['list']:
-            tree.insert('list', 'end', i, text=i)
+            tree.insert('list', 'end', i, text=i,
+                        open=visible['shared'])
 
         tree.insert('', 'end', 'shared', 
-                    text="Shared with you")
+                    text="Shared with you", 
+                    open=visible['shared'])
         for i in dsets['shared']:
             tree.insert('shared', 'end', values=(i[0], i[2]),
                         text=i[2])
 
         tree.insert('', 'end', 'requests', 
-                    text="Share Requests")
+                    text="Share Requests",
+                    open=visible['requests'])
         for i in dsets['requests']:
             tree.insert('requests', 'end', values=(i[0], i[2]),
                         text=i[2])
 
         tree.insert("", "end", "user's shares", 
-                    text="Shared by you")
+                    text="Shared by you",
+                    open=visible["user's shares"])
         for i in dsets["user's shares"]:
             tree.insert("user's shares", "end", values=(i[1], i[2]),
                         text=i[2])
