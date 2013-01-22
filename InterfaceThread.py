@@ -4,7 +4,8 @@ import tkFileDialog, tkMessageBox, re, socket
 import tkSimpleDialog
 from tkCustomDialog import Dialog
 from NetworkThread import NetworkThread
-from traceback import print_exc
+import tkFont
+from Queue import Empty
 
 def is_error(obj):
     return isinstance(obj, Exception)
@@ -91,8 +92,8 @@ class MainWindow:
         # Set up a network thread
         self.net_thread = NetworkThread()
         self.net_thread.start()
-
         self.real_root = real_root
+        self.real_root.title("COVI")
         self.root = ttk.Frame(real_root)
         root = self.root
         root.pack()
@@ -106,6 +107,7 @@ class MainWindow:
         set_state(self.root)
         self.real_root.withdraw()
         init_dialog = tk.Toplevel()
+        init_dialog.title("COVI: Choose data source")
         init = InitWindow(init_dialog, self.net_thread)
         center_window(init_dialog)
         root.wait_window(init_dialog)
@@ -114,9 +116,17 @@ class MainWindow:
 
         if init.mode == 'server':
             dset_dialog = ServerDsetWindow(self.real_root,
-                                            net_thread=self.net_thread,)
-#            center_window(dset_dialog)
-#            root.wait_window(dset_dialog)
+                                            net_thread=self.net_thread,
+                                            title="COVI: %s: Datasets"%init.user_var.get())
+            if hasattr(dset_dialog, 'dset'):
+                self.dset = dset_dialog.dset
+                if type(self.dset) == list:
+                    dset_name = '/'.join(self.dset)
+                else:
+                    dset_name = self.dset
+                tkMessageBox.showinfo("We have a dataset!", "It's %s!"%(dset_name))
+            else:
+                return
         
 
 
