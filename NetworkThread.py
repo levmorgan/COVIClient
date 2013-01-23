@@ -26,11 +26,14 @@ class NetworkThread(threading.Thread):
             "close":sc.close,
             "rename_admin":sc.rename_admin,
             "remove_admin":sc.remove_admin,}
+        self.authenticated = False
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.sock.settimeout(10)
         self.sock = ssl.wrap_socket(self.sock)
         self.setDaemon(True)
- 
+        
+    def set_auth(self, authed=True):
+        self.authenticated = authed
 
     def run(self):
         while True:

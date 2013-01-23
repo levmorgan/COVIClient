@@ -89,33 +89,21 @@ def handle_net_response(res, msg):
         return res
 
 class MainWindow:
-    def __init__(self, real_root):
-        # Set up a network thread
-        self.net_thread = NetworkThread()
-        self.net_thread.start()
-        self.real_root = real_root
-        self.real_root.title("COVI")
-        self.root = ttk.Frame(real_root)
-        root = self.root
-        root.pack()
-        rootlabel = ttk.Label(root, 
-            text="I'm the main window!\nWhen I grow up, I'll be full of widgets!")
-        rootlabel.pack()
-        center_window(real_root)
-
-        # TODO: Make all of the widgets
-
-        set_state(self.root)
-        self.real_root.withdraw()
-        init_dialog = tk.Toplevel()
-        init_dialog.title("COVI: Choose data source")
-        init = InitWindow(init_dialog, self.net_thread)
-        center_window(init_dialog)
-        root.wait_window(init_dialog)
-
+    def begin_session(self):
+        set_state(self.root, 'disabled')
+#        self.real_root.withdraw()
+        if not self.net_thread.authenticated:
+            init_dialog = tk.Toplevel()
+            init_dialog.title("COVI: Choose data source")
+            init = InitWindow(init_dialog, self.net_thread)
+            center_window(init_dialog)
+            root.wait_window(init_dialog)
+            mode = init.mode
+        else:
+            mode = 'server'
 #        print init.mode
 
-        if init.mode == 'server':
+        if mode == 'server':
             dset_dialog = ServerDsetWindow(self.real_root,
                                             net_thread=self.net_thread,
                                             title="COVI: %s: Datasets"%init.user_var.get())
@@ -126,8 +114,89 @@ class MainWindow:
                 else:
                     dset_name = self.dset
                 tkMessageBox.showinfo("We have a dataset!", "It's %s!"%(dset_name))
-            else:
-                return
+        elif mode == 'client':
+            # TODO: Load dataset
+            tkMessageBox.showinfo("Client Mode", "Client Mode")
+            pass
+        
+        set_state(self.root, 'enabled')
+    
+    def __init__(self, real_root):
+        # Set up a network thread
+        self.net_thread = NetworkThread()
+        self.net_thread.start()
+        self.real_root = real_root
+        self.real_root.resizable(0,0)
+        self.real_root.title("COVI")
+        self.root = ttk.Frame(real_root)
+        root = self.root
+        root.pack(fill=tk.BOTH, expand=tk.YES)
+        self.body()
+        #rootlabel = ttk.Label(root, 
+        #    text="I'm the main window!\nWhen I grow up, I'll be full of widgets!")
+        #rootlabel.pack()
+        center_window(real_root)
+
+        self.begin_session()
+        
+    def scale_command(self, event):
+        self.threshold_label['text'] = str(self.threshold.get())
+        
+    def switch_command(self):
+        '''
+        Switch datasets
+        '''
+        self.begin_session()
+            
+    
+    def open_command(self):
+        pass
+    
+    def mode_command(self):
+        pass
+    
+    def color_command(self):
+        pass
+    
+    def redraw_command(self):
+        pass
+        
+    def body(self):
+        self.threshold = tk.IntVar(0)
+        self.scale = ttk.Scale(self.root, from_=100, to=0, 
+                               variable=self.threshold,
+                               orient=tk.VERTICAL,
+                               command=self.scale_command)
+        self.scale.grid(column=0, row=0, rowspan=6, sticky=(tk.N+tk.S),
+                        padx='3m', pady='1m')
+        self.threshold_label = ttk.Label(self.root, text="0", justify=tk.LEFT)
+        self.threshold_label.grid(column=0, row=6)
+        
+        self.node_label = ttk.Label(self.root, text="Node")
+        self.node_label.grid(column=1, row=0, sticky=tk.W)
+        self.node_num = tk.IntVar(0) 
+        self.number_label = ttk.Label(self.root, text='%i'%0, width='6',
+                                      relief=tk.SUNKEN, justify=tk.RIGHT)
+        self.number_label.grid(column=1, row=1, sticky=tk.W)
+        
+        self.switch_button = ttk.Button(self.root, text= "Switch\nDataset",
+                                        command=self.switch_command)
+        self.switch_button.grid(column=1, row=2)
+        self.open_button = ttk.Button(self.root, text= "Open\nDataset",
+                                        command=self.open_command)
+        self.open_button.grid(column=1, row=3)
+        self.mode_button = ttk.Button(self.root, text= "Graph\nMode",
+                                        command=self.mode_command)
+        self.mode_button.grid(column=1, row=4)
+        self.color_button = ttk.Button(self.root, text= "Color\nMode",
+                                        command=self.color_command)
+        self.color_button.grid(column=1, row=5)
+        self.redraw_button = ttk.Button(self.root, text= "Redraw",
+                                        command=self.redraw_command)
+        self.redraw_button.grid(column=0, row=7, sticky=(tk.W+tk.E), 
+                                columnspan=2, padx='1m')
+        
+        add_padding(self.root)
         
 class NetworkDialog(object):
     #TODO: Test data validation
@@ -153,12 +222,17 @@ class NetworkDialog(object):
             # Validate the response
             if expected == 'req ok' and res == True:
                 break
-            elif res['type'] == expected:
+            elif type(res) == dict and res['type'] == expected:
                 break
+            elif isinstance(res, Exception):
+                return res
             else:
                 tkMessageBox.showinfo("Unexpected data from the server", 
                                       "COVI got an unexpected response from the server. It's "+
                                       "probably nothing to worry about.")
+                # TODO: Remove debug output
+                print "Unexpected response:"
+                print res
                 # If the data isn't valid and there isn't any more, return False
                 if self.net_thread.res_q.empty():
                     return False
@@ -177,9 +251,10 @@ class InitWindow(NetworkDialog):
         super(InitWindow, self).__init__()
         self.net_thread = net_thread
         self.real_root = real_root
+        self.real_root.resizable(0,0)
         self.root = ttk.Frame(real_root)
         root = self.root
-        root.pack()
+        root.pack(fill=tk.BOTH, expand=tk.YES)
         top_label = ttk.Label(root, text="Data Source:")
         top_label.pack(anchor=tk.W)
 
@@ -201,7 +276,7 @@ class InitWindow(NetworkDialog):
                                 value=0, 
                                 command=self.radio_command)
         server_radio.pack(anchor=tk.W)
-        server_frame.pack(anchor=tk.W)
+        server_frame.pack(anchor=tk.W, fill=tk.BOTH, expand=tk.YES)
 
         client_radio = ttk.Radiobutton(root, text="Local Dataset",
                                 variable=self.radio_var,
@@ -240,21 +315,21 @@ class InitWindow(NetworkDialog):
         addr_field = ttk.Entry(server_frame, 
                                 textvariable=self.addr_var,
                                 width=txt_len)
-        addr_field.grid(row=0, column=1, sticky=tk.W)
+        addr_field.grid(row=0, column=1, sticky=(tk.W+tk.E))
 
         port_label = ttk.Label(server_frame, text="Port")
         port_label.grid(row=1, column=0, sticky=tk.W)
         port_field = ttk.Entry(server_frame, 
                                 textvariable=self.port_var,
                                 width=6)
-        port_field.grid(row=1, column=1, sticky=tk.W)
+        port_field.grid(row=1, column=1, sticky=(tk.W+tk.E))
 
         user_label = ttk.Label(server_frame, text="Username")
         user_label.grid(row=2, column=0, sticky=tk.W)
         user_field = ttk.Entry(server_frame, 
                                 textvariable=self.user_var,
                                 width=txt_len)
-        user_field.grid(row=2, column=1, sticky=tk.W)
+        user_field.grid(row=2, column=1, sticky=(tk.W+tk.E))
 
         pass_label = ttk.Label(server_frame, text="Password")
         pass_label.grid(row=3, column=0, sticky=tk.W)
@@ -262,7 +337,7 @@ class InitWindow(NetworkDialog):
                                 textvariable=self.pass_var,
                                 show=u'\u2022',
                                 width=txt_len)
-        pass_field.grid(row=3, column=1, sticky=tk.W)
+        pass_field.grid(row=3, column=1, sticky=(tk.W+tk.E))
 
         add_padding(server_frame)
 
@@ -315,27 +390,35 @@ class InitWindow(NetworkDialog):
                                 "Please choose another directory.")
     def validate(self):
         MAX_FIELD_LENGTH = 140
-        for i in self.fields:
-            value = str(i.get())
-            if len(value) > MAX_FIELD_LENGTH:
-                tkMessageBox.showwarning("Validation Error",
-                    "Field %s has a maximum length of %i"%(
-                        self.field_names[str(i)], MAX_FIELD_LENGTH))
-            if len(value) < 2:
-                tkMessageBox.showwarning("Validation Error",
-                    "Field %s has a minimum length of %i"%(
-                        self.field_names[str(i)], 2))
+        if self.radio_var.get() == 0:
+            # Check server-related fields
+            for i in self.fields:
+                value = str(i.get())
+                if len(value) > MAX_FIELD_LENGTH:
+                    tkMessageBox.showwarning("Validation Error",
+                        "Field %s has a maximum length of %i"%(
+                            self.field_names[str(i)], MAX_FIELD_LENGTH))
+                if len(value) < 2:
+                    tkMessageBox.showwarning("Validation Error",
+                        "Field %s has a minimum length of %i"%(
+                            self.field_names[str(i)], 2))
+                    return 0
+                if not re.match("[0-9A-Za-z\-\.]", value):
+                    tkMessageBox.showwarning("Validation Error",
+                        "Invalid characters in %s: %s"%(
+                            self.field_names[str(i)], 
+                            ' '.join(
+                                set(
+                                re.findall('[^0-9A-Za-z\-\.]')
+                                ))))
+                    return 0
+            return 1
+        else:
+            # Check client-related fields
+            if valid_dset(self.dset_var):
+                return 1
+            else:
                 return 0
-            if not re.match("[0-9A-Za-z\-\.]", value):
-                tkMessageBox.showwarning("Validation Error",
-                    "Invalid characters in %s: %s"%(
-                        self.field_names[str(i)], 
-                        ' '.join(
-                            set(
-                            re.findall('[^0-9A-Za-z\-\.]')
-                            ))))
-                return 0
-        return 1
                 
     def cleanup(self):
         '''
@@ -372,14 +455,14 @@ class InitWindow(NetworkDialog):
             res = handle_net_response(res, "Authentication")
             if not res:
                 return
-            
+            else:
+                self.net_thread.set_auth(True)
             self.mode = 'server'
             
         elif self.radio_var.get() == 1:
             # TODO: Go into local dataset mode
             self.mode = 'local'
 
-        tkMessageBox.showinfo("Radical!", "You hit OK! Way to go!")
         self.real_root.destroy()
 
 class ServerDsetWindow(Dialog, NetworkDialog):
@@ -567,11 +650,12 @@ class ServerDsetWindow(Dialog, NetworkDialog):
         
         if parent != "requests":
             set_state(self.accept_button, 'disabled')    
+            
+    def validate(self):
+        '''
+        Called when Ok is pressed. Makes sure a valid dataset is selected.
+        '''
         
-    def apply(self):
-        '''
-        Called when Ok is pressed. Load the selected dataset
-        '''
         item = self.tree.selection()[0]
         item_details = self.tree.item(item)
         parent = self.tree.parent(item)
@@ -584,7 +668,10 @@ class ServerDsetWindow(Dialog, NetworkDialog):
                 self.dset = item_details['values']
             else:
                 self.dset = item
-        
+            return True
+        tkMessageBox.showwarning("Can't load dataset", 
+            "You can only load datasets you own or ones that are shared with you.")
+        return False
         
         
     def sortby(self, tree, col, descending):
@@ -617,7 +704,6 @@ class ServerDsetWindow(Dialog, NetworkDialog):
         # Store which categories are expanded in the tree
         visible = defaultdict(lambda: False, 
                               ((i, bool(tree.item(i)['open'])) for i in children))
-        print visible
         
         # Clear out any children in the tree
         [self.tree.delete(i)
@@ -646,15 +732,15 @@ class ServerDsetWindow(Dialog, NetworkDialog):
             print res
             dsets = {'list':[], 'shared':[], 'requests':[], "user's shares":[]} 
         
-        # Insert nodes into the tree
-        tree.insert('', 'end', 'list',
-                    text='Your Datasets')
         # Sort the lists of datasets
         [dsets[i].sort() for i in dsets if type(dsets[i]) == list]
+        
+        # Insert nodes into the tree
+        tree.insert('', 'end', 'list',
+                    text='Your Datasets', open=visible['list'])
 
         for i in dsets['list']:
-            tree.insert('list', 'end', i, text=i,
-                        open=visible['shared'])
+            tree.insert('list', 'end', i, text=i)
 
         tree.insert('', 'end', 'shared', 
                     text="Shared with you", 
@@ -692,6 +778,7 @@ class ServerDsetWindow(Dialog, NetworkDialog):
             net_thread=a NetworkThread object
         '''
         self.root = root
+        self.resizable(0,0)
         self.net_thread = kwargs['net_thread']
         
         self.tree_columns = ["From/To"]
