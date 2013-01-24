@@ -6,30 +6,29 @@ Created on Nov 28, 2012
 import itertools, subprocess, socket, re, signal, sys, os
 from math import sqrt
 from threading import Thread
-from Queue import Queue
-from time import sleep
-from random import uniform
+from Queue import Queue, Empty
 class ProcessingThread(Thread):
         
     
-    def __init__(self, input_Q, output_Q, spec_file, surfvol_file, dset):
+    def __init__(self, spec_file, surfvol_file, dset):
         '''
         Constructor
         '''
         Thread.__init__(self)
-        self.input_Q = input_Q
-        self.output_Q = output_Q
         self.spec_file = spec_file
         self.surfvol_file = surfvol_file
         self.do_file = 'shapes'
         self.dset_path = dset
         self.selected_cluster = None
+        self.job_q = Queue()
+        self.res_q = Queue()
+        self.cont = True
         
         # Set default shape and color mode
         self.shape = 'sized spheres'
-        self.mode = 'heat'
+        self.color = 'heat'
         self.shapes = itertools.cycle(['paths', "spheres", "sized spheres"])
-        self.modes = itertools.cycle(["brightness", "heat"])
+        self.colors = itertools.cycle(["brightness", "heat"])
 
     def run(self):
         self.svr_socket = socket.socket(socket.AF_INET, 
@@ -43,6 +42,8 @@ class ProcessingThread(Thread):
                     "-np", "53211"],
                     stderr=subprocess.PIPE,
                     stdout=subprocess.PIPE)
+
+        # TODO: Add a message telling the user to press 't' in SUMA
         
         self.svr_socket.listen(5)
         # Tell SUMA to initiate the NIML connection
@@ -127,7 +128,7 @@ class ProcessingThread(Thread):
         self.load_surface(os.path.join(os.path.split(spec_file)[0], self.surface_label)) 
         
         # Start the main loop
-        while True:
+        while self.cont:
             # Alternately check the socket and command queue 
             try:
                 # Check for mouse clicks in SUMA 
@@ -140,9 +141,11 @@ class ProcessingThread(Thread):
                 # If the socket times out, it's no problem. Just check the queue.
                 pass
             
-            if not self.input_Q.empty():
-                cmd = in_queue.get_nowait()
+            try:
+                cmd = self.job_q.get_nowait()
                 self.handle_cmd(cmd)
+            except Empty:
+                pass
                 
     def handle_mouse_click(self, dat, force_update=False):
         try:
@@ -210,7 +213,17 @@ class ProcessingThread(Thread):
         Handle a command from some other part of the program
         '''
         #TODO: Finish handle command method
-        pass
+
+        if cmd[0] == 'threshold':
+            self.threshold = cmd[1]
+            self.redraw()
+        elif cmd[0] == 'shape':
+            self.shape = cmd[1]
+        elif cmd[0] == 'color':
+            self.color == cmd[1]
+        elif cmd[0] == 'die':
+            self.cont = False
+
     """
     def interp_parabola(self, p1, p2, normal, height, n=20):
         '''
@@ -226,8 +239,7 @@ class ProcessingThread(Thread):
         # Calculate the line between p1 and p2
         for i in xrange(3):
             rng = p1p2[i]
-            offset = p1[i]
-            line[i] = [ j for j in itertools.imap(make_line, xrange(n+1)) ]
+            offset = p1[i[i] = [ j for j in itertools.imap(make_line, xrange(n+1)) ]
         
         # Calculate the parabola in 2D
         rng = sqrt( p1p2[0]**2 + p1p2[1]**2 + p1p2[2]**2 )
@@ -320,10 +332,10 @@ class ProcessingThread(Thread):
         # Normalize a value self.threshold<=t<=1 to 0<=t<=1
         norm = lambda x, t=self.threshold: (x+t-1.)/t
         
-        if self.mode == 'heat':
+        if self.color == 'heat':
             colored = [(i[0], norm(i[1]), 0., 1.-norm(i[1]), 1.) for i in filtered_matrix]
         
-        if self.mode == 'brightness':
+        if self.color == 'brightness':
             colored = range(len(filtered_matrix))
             for i in xrange(len(filtered_matrix)):
                 node = filtered_matrix[i][0]
@@ -345,11 +357,11 @@ class ProcessingThread(Thread):
         source node to destination nodes and loads it into SUMA.
         '''
         # Valid shapes: paths, spheres (only supports heat)
-        # Valid modes: brightness, heat, alpha
+        # Valid colors: brightness, heat, alpha
         shape = self.shape
-        mode = self.mode
+        color = self.color
 #        shape = 'spheres'
-#        mode = 'heat'
+#        color = 'heat'
         
         # Function to normalize thresholded values
         self.threshold = 0.5
@@ -409,7 +421,7 @@ class ProcessingThread(Thread):
             print len(paths)
             for dest in xrange(len(indices)):
                 path = paths[dest]
-                if mode == 'brightness': 
+                if color == 'brightness': 
                     for line_ind in xrange(len(path)):
                         line = path[line_ind]
                         norm_corr = norm(matrix[indices[dest]][1])
@@ -418,7 +430,7 @@ class ProcessingThread(Thread):
                              float(line[3])*norm_corr, 
                              float(line[4])*norm_corr, 
                              float(line[5])]
-                elif mode == 'heat':
+                elif color == 'heat':
                     for line_ind in xrange(len(path)):
                         line = path[line_ind]
                         path[line_ind] = [int(line[0]), int(line[1]), 
@@ -426,7 +438,7 @@ class ProcessingThread(Thread):
                              0.0, 
                              (1-norm(matrix[indices[dest]][1])), 
                              float(line[5])]
-                elif mode == 'alpha':
+                elif color == 'alpha':
                     for line_ind in xrange(len(path)):
                         line = path[line_ind]
                         path[line_ind] = [int(line[0]), int(line[1]), 
@@ -448,7 +460,7 @@ class ProcessingThread(Thread):
             # Generate spheres
             do_file = open(self.do_file+'.1D.do', 'w')
             do_file.write("#node-based_spheres\n")
-            if mode == 'nodemap':
+            if color == 'nodemap':
                 for i in xrange(0,self.num_nodes,4):
                     do_file.write("%i %.3f 0.0 %.3f 1.0\n"%(i, 
                                                     norm(float(i)/float(self.num_nodes)), 
@@ -494,8 +506,8 @@ class ProcessingThread(Thread):
             self.shape = self.shapes.next()
             print "Switched shape to %s"%(self.shape)
         elif re.match("[mMcC]", inp):
-            self.mode = self.modes.next()
-            print "Switched mode to %s"%(self.mode)
+            self.color = self.colors.next()
+            print "Switched mode to %s"%(self.color)
             
         # Update the graphic
         self.redraw()

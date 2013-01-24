@@ -1,12 +1,12 @@
 import Tkinter as tk
 import ttk
-import tkFileDialog, tkMessageBox, re, socket
-import tkSimpleDialog
+import tkFileDialog, tkMessageBox, tkFont, tkSimpleDialog
+import re, socket, os
 from tkCustomDialog import Dialog
 from NetworkThread import NetworkThread
-import tkFont
 from Queue import Empty
 from collections import defaultdict
+from COVIClient.ProcessingThreadClass import ProcessingThread
 
 def is_error(obj):
     return isinstance(obj, Exception)
@@ -88,6 +88,64 @@ def handle_net_response(res, msg):
 #        print "%s is not an error."%(str(res))
         return res
 
+
+class LocalSpecAndVolWindow(Dialog): 
+    def validate(self):
+        return self.spec_file and self.vol_file
+    
+    def browse_command(self, source):
+        if source == 0:
+            # Get the spec file location
+            self.spec_file = tkFileDialog.askopenfile(mode="r", mustexist=True,
+                    initialdir=self.dset_path, 
+                    filetypes=[("SUMA spec file", "*.spec")])
+            self.spec_var.set(self.spec_file)
+        elif source == 1:
+            # Get the volume file location
+            self.vol_file = tkFileDialog.askopenfile(mode="r", mustexist=True,
+                    initialdir=self.dset_path, 
+                    filetypes=[("AFNI HEAD file", "*.HEAD"),
+                               ("AFNI BRIK file", "*.BRIK")])
+            # Remove the file extension
+            self.vol_file = os.path.splitext(self.vol_path)[0]
+            self.vol_var.set(self.spec_file)
+            pass
+    def body(self, root, dset_path):
+        self.spec_file = ''
+        self.vol_file = ''
+        self.dset_path = dset_path
+        title_label = ttk.Label(root, text='Select Spec file and Volume File')
+        title_label.grid(row=0, column=0) 
+        
+        spec_label = ttk.Label(root, text="Spec file")
+        spec_label.grid(row=1, column=0)
+        
+        self.spec_var = tk.StringVar()
+        self.spec_field = ttk.Entry(root, width=60,
+                                textvariable=self.spec_var)
+        self.spec_field.grid(row=1, column=1)
+        
+        self.spec_browse_button = ttk.Button(root, text="Browse",
+                                             command=lambda: self.browse_command(0))
+        self.spec_field.grid(row=1, column=2)
+        
+        vol_label = ttk.Label(root, text="Volume file")
+        vol_label.grid(row=2, column=0)
+        
+        self.vol_var = tk.StringVar()
+        self.vol_field = ttk.Entry(root, width=60,
+                                textvariable=self.vol_var)
+        self.vol_field.grid(row=2, column=1)
+        
+        self.vol_browse_button = ttk.Button(root, text="Browse",
+                                             command=lambda: self.browse_command(1))
+        self.vol_field.grid(row=2, column=2)
+        
+        add_padding(root)
+        
+        
+
+
 class MainWindow:
     def begin_session(self):
         set_state(self.root, 'disabled')
@@ -101,7 +159,6 @@ class MainWindow:
             mode = init.mode
         else:
             mode = 'server'
-#        print init.mode
 
         if mode == 'server':
             dset_dialog = ServerDsetWindow(self.real_root,
@@ -114,10 +171,25 @@ class MainWindow:
                 else:
                     dset_name = self.dset
                 tkMessageBox.showinfo("We have a dataset!", "It's %s!"%(dset_name))
-        elif mode == 'client':
-            # TODO: Load dataset
-            tkMessageBox.showinfo("Client Mode", "Client Mode")
-            pass
+            
+            #TODO: Get the surface from the server
+            
+        elif mode == 'local':
+            self.dset = init.dset_var.get()
+            # TODO: Load dataset & surfaces
+            sv_window = LocalSpecAndVolWindow(self.real_root,
+                                              title="COVI: Select Spec "
+                                              +"and Volume Files",
+                                              dset_path=self.dset)
+            
+            if sv_window.spec_file and sv_window.vol_file:
+                self.spec_file = sv_window.spec_file
+                self.vol_file = sv_window.vol_file
+                self.proc_thread = ProcessingThread(spec_file=self.spec_file,
+                                                    surfvol_file=self.vol_file,
+                                                    dset = self.dset)
+                self.proc_thread.start()
+            
         
         set_state(self.root, 'enabled')
     
@@ -177,7 +249,7 @@ class MainWindow:
         self.node_num = tk.IntVar(0) 
         self.number_label = ttk.Label(self.root, text='%i'%0, width='6',
                                       relief=tk.SUNKEN, justify=tk.RIGHT)
-        self.number_label.grid(column=1, row=1, sticky=tk.W)
+        self.number_label.grid(column=1, row=1, sticky=tk.W+tk.E, padx='0.6m')
         
         self.switch_button = ttk.Button(self.root, text= "Switch\nDataset",
                                         command=self.switch_command)
@@ -241,7 +313,6 @@ class NetworkDialog(object):
         
         return res
 
-
 class InitWindow(NetworkDialog):
     def __init__(self, real_root, net_thread):
         '''
@@ -256,8 +327,7 @@ class InitWindow(NetworkDialog):
         root = self.root
         root.pack(fill=tk.BOTH, expand=tk.YES)
         top_label = ttk.Label(root, text="Data Source:")
-        top_label.pack(anchor=tk.W)
-
+        top_label.pack(anchor=tk.W, padx='1m', pady='0.5m')
         # can be 'local', 'server', or '' (cancelled)
         self.mode = ''
 
@@ -275,16 +345,16 @@ class InitWindow(NetworkDialog):
                                 variable=self.radio_var,
                                 value=0, 
                                 command=self.radio_command)
-        server_radio.pack(anchor=tk.W)
-        server_frame.pack(anchor=tk.W, fill=tk.BOTH, expand=tk.YES)
+        server_radio.pack(anchor=tk.W, padx='1m')
+        server_frame.pack(anchor=tk.W, fill=tk.BOTH, expand=tk.YES, padx='1m')
 
         client_radio = ttk.Radiobutton(root, text="Local Dataset",
                                 variable=self.radio_var,
                                 value=1, 
                                 command=self.radio_command)
-        client_radio.pack(anchor=tk.W)
+        client_radio.pack(anchor=tk.W, padx='1m')
         #local_frame.pack(anchor=tk.W, fill=tk.X)
-        local_frame.pack(anchor=tk.CENTER, fill=tk.X)
+        local_frame.pack(anchor=tk.CENTER, fill=tk.X, padx='1m')
 
         # Create the server connection frame
         # Create tk variables to hold info about the server connection
@@ -311,33 +381,33 @@ class InitWindow(NetworkDialog):
         txt_len = 60
 
         addr_label = ttk.Label(server_frame, text="Address")
-        addr_label.grid(row=0, column=0, sticky=tk.W)
+        addr_label.grid(row=0, column=0, sticky=tk.W, padx='1m')
         addr_field = ttk.Entry(server_frame, 
                                 textvariable=self.addr_var,
                                 width=txt_len)
-        addr_field.grid(row=0, column=1, sticky=(tk.W+tk.E))
+        addr_field.grid(row=0, column=1, sticky=(tk.W+tk.E), padx='1m')
 
         port_label = ttk.Label(server_frame, text="Port")
-        port_label.grid(row=1, column=0, sticky=tk.W)
+        port_label.grid(row=1, column=0, sticky=tk.W, padx='1m')
         port_field = ttk.Entry(server_frame, 
                                 textvariable=self.port_var,
                                 width=6)
-        port_field.grid(row=1, column=1, sticky=(tk.W+tk.E))
+        port_field.grid(row=1, column=1, sticky=(tk.W+tk.E), padx='1m')
 
         user_label = ttk.Label(server_frame, text="Username")
-        user_label.grid(row=2, column=0, sticky=tk.W)
+        user_label.grid(row=2, column=0, sticky=tk.W, padx='1m')
         user_field = ttk.Entry(server_frame, 
                                 textvariable=self.user_var,
                                 width=txt_len)
-        user_field.grid(row=2, column=1, sticky=(tk.W+tk.E))
+        user_field.grid(row=2, column=1, sticky=(tk.W+tk.E), padx='1m')
 
         pass_label = ttk.Label(server_frame, text="Password")
-        pass_label.grid(row=3, column=0, sticky=tk.W)
+        pass_label.grid(row=3, column=0, sticky=tk.W, padx='1m')
         pass_field = ttk.Entry(server_frame, 
                                 textvariable=self.pass_var,
                                 show=u'\u2022',
                                 width=txt_len)
-        pass_field.grid(row=3, column=1, sticky=(tk.W+tk.E))
+        pass_field.grid(row=3, column=1, sticky=(tk.W+tk.E), padx='1m')
 
         add_padding(server_frame)
 
@@ -346,7 +416,8 @@ class InitWindow(NetworkDialog):
         self.dset_var = tk.StringVar()
         self.dset_field = ttk.Entry(local_frame,
                                 textvariable=self.dset_var)
-        self.dset_field.pack(side=tk.LEFT, anchor=tk.W, fill=tk.X, expand=1)
+        self.dset_field.pack(side=tk.LEFT, anchor=tk.W, fill=tk.X, 
+                             expand=True, padx='1m')
         #self.dset_field.grid(row=0, column=1, sticky=tk.E+tk.W)
 
         browse_button = ttk.Button(local_frame,
@@ -359,7 +430,7 @@ class InitWindow(NetworkDialog):
 
         ok_button = ttk.Button(root, text="Ok",
                                 command=self.ok_command)
-        ok_button.pack(anchor=tk.E)
+        ok_button.pack(anchor=tk.E, padx='1m', pady='1m')
 
 
         # Bind the relevant keys
@@ -565,7 +636,6 @@ class ServerDsetWindow(Dialog, NetworkDialog):
                     ["copy_shared", old, new, owner])
             
             # TODO: Start an animation
-            wait = True
             res = self.recv_response()
             handle_net_response(res, "Copying")
             self.update_tree()
@@ -836,7 +906,7 @@ class ServerDsetWindow(Dialog, NetworkDialog):
                                     command=self.info_command)
         self.info_button.pack()
         
-    
+
         
 
 
