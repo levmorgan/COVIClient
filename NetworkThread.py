@@ -28,6 +28,8 @@ class NetworkThread(threading.Thread):
             "remove_admin":sc.remove_admin,}
         self.authenticated = False
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        # Bind to the port even if it's already in use
+        self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.sock.settimeout(10)
         self.sock = ssl.wrap_socket(self.sock)
         self.setDaemon(True)
