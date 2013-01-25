@@ -14,22 +14,23 @@ def is_error(obj):
 def valid_dset(dset):
     '''
     Check to see whether a directory is a valid COVI dataset
+    by making sure it's a directory and checking for a few files
     '''
-    # TODO: Finish valid_dset
-#    print dset
-    return True
+    return bool(os.path.isdir(dset) and 
+            os.access(os.path.join(dset, 'clusters.1D'), os.W_OK) and
+            os.access(os.path.join(dset, '0.stat.1D'), os.W_OK))
 
 def set_state(widget, state='disabled'):
-        '''
-        Enable or disable a widget and all its children.
-        Disable by default.
-        '''
-        try:
-            widget.configure(state=state)
-        except tk.TclError:
-            pass
-        for child in widget.winfo_children():
-            set_state(child, state=state)
+    '''
+    Enable or disable a widget and all its children.
+    Disable by default.
+    '''
+    try:
+        widget.configure(state=state)
+    except tk.TclError:
+        pass
+    for child in widget.winfo_children():
+        set_state(child, state=state)
 '''
 def remove_widget(widget, method='pack'):
     children = widget.winfo_children()
@@ -91,31 +92,36 @@ def handle_net_response(res, msg):
 
 class LocalSpecAndVolWindow(Dialog): 
     def validate(self):
-        return self.spec_file and self.vol_file
+        if not self.spec_file and self.vol_file:
+            tkMessageBox.showwarning("Spec and volume file selection", 
+                                     "You must specify both a spec and a volume "+
+                                     "file")
+            return False
+        return True
     
     def browse_command(self, source):
         if source == 0:
             # Get the spec file location
-            self.spec_file = tkFileDialog.askopenfile(mode="r", mustexist=True,
+            self.spec_file = tkFileDialog.askopenfilename(multiple=False,
                     initialdir=self.dset_path, 
                     filetypes=[("SUMA spec file", "*.spec")])
             self.spec_var.set(self.spec_file)
         elif source == 1:
             # Get the volume file location
-            self.vol_file = tkFileDialog.askopenfile(mode="r", mustexist=True,
+            self.vol_file = tkFileDialog.askopenfilename(multiple=False,
                     initialdir=self.dset_path, 
                     filetypes=[("AFNI HEAD file", "*.HEAD"),
                                ("AFNI BRIK file", "*.BRIK")])
             # Remove the file extension
-            self.vol_file = os.path.splitext(self.vol_path)[0]
-            self.vol_var.set(self.spec_file)
+            self.vol_file = os.path.splitext(self.vol_file)[0]
+            self.vol_var.set(self.vol_file)
             pass
     def body(self, root, dset_path):
         self.spec_file = ''
         self.vol_file = ''
         self.dset_path = dset_path
         title_label = ttk.Label(root, text='Select Spec file and Volume File')
-        title_label.grid(row=0, column=0) 
+        title_label.grid(row=0, column=0, columnspan=3) 
         
         spec_label = ttk.Label(root, text="Spec file")
         spec_label.grid(row=1, column=0)
@@ -127,7 +133,7 @@ class LocalSpecAndVolWindow(Dialog):
         
         self.spec_browse_button = ttk.Button(root, text="Browse",
                                              command=lambda: self.browse_command(0))
-        self.spec_field.grid(row=1, column=2)
+        self.spec_browse_button.grid(row=1, column=2)
         
         vol_label = ttk.Label(root, text="Volume file")
         vol_label.grid(row=2, column=0)
@@ -139,7 +145,7 @@ class LocalSpecAndVolWindow(Dialog):
         
         self.vol_browse_button = ttk.Button(root, text="Browse",
                                              command=lambda: self.browse_command(1))
-        self.vol_field.grid(row=2, column=2)
+        self.vol_browse_button.grid(row=2, column=2)
         
         add_padding(root)
         
@@ -149,7 +155,7 @@ class LocalSpecAndVolWindow(Dialog):
 class MainWindow:
     def begin_session(self):
         set_state(self.root, 'disabled')
-#        self.real_root.withdraw()
+        self.real_root.withdraw()
         if not self.net_thread.authenticated:
             init_dialog = tk.Toplevel()
             init_dialog.title("COVI: Choose data source")
@@ -191,7 +197,9 @@ class MainWindow:
                 self.proc_thread.start()
             
         
-        set_state(self.root, 'enabled')
+        set_state(self.real_root, 'enabled')
+        self.real_root.deiconify()
+        
     
     def __init__(self, real_root):
         # Set up a network thread
@@ -457,7 +465,7 @@ class InitWindow(NetworkDialog):
             self.dset_var.set(path)
         else:
             tkMessageBox.showwarning("Error",
-                                "%s is not a valid COVI dataset. "+
+                                "%s is not a valid COVI dataset. "%path+
                                 "Please choose another directory.")
     def validate(self):
         MAX_FIELD_LENGTH = 140
@@ -486,7 +494,7 @@ class InitWindow(NetworkDialog):
             return 1
         else:
             # Check client-related fields
-            if valid_dset(self.dset_var):
+            if valid_dset(self.dset_var.get()):
                 return 1
             else:
                 return 0
