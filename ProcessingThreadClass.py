@@ -33,15 +33,16 @@ class ProcessingThread(Thread):
     def run(self):
         self.svr_socket = socket.socket(socket.AF_INET, 
                                     socket.SOCK_STREAM)
+        self.svr_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.svr_socket.bind(("127.0.0.1", 53211))
         self.suma = subprocess.Popen(["/home/morganl/workspace/AFNI/Debug/afni_src/suma", 
                     "-spec", self.spec_file, 
                     "-sv", self.surfvol_file,
                     "-niml", 
                     "-ah", "127.0.0.1",
-                    "-np", "53211"],
-                    stderr=subprocess.PIPE,
-                    stdout=subprocess.PIPE)
+                    "-np", "53211"],)
+#                    stderr=subprocess.PIPE,
+#                    stdout=subprocess.PIPE)
 
         # TODO: Add a message telling the user to press 't' in SUMA
         
@@ -527,7 +528,7 @@ if __name__ == '__main__':
         print "Usage: python ProcessingThreadClass.py <spec file> <surfvol file>"
         sys.exit(1)
         
-    proc_thread = ProcessingThread(in_queue, out_queue, spec_file, surfvol_file, dset='test_dset')
+    proc_thread = ProcessingThread(spec_file, surfvol_file, dset='test_dset')
     proc_thread.setDaemon(True)
     proc_thread.start()
     
