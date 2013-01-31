@@ -110,10 +110,10 @@ class LocalSpecAndVolWindow(Dialog):
             # Get the volume file location
             self.vol_file = tkFileDialog.askopenfilename(multiple=False,
                     initialdir=self.dset_path, 
-                    filetypes=[("AFNI HEAD file", "*.HEAD"),
-                               ("AFNI BRIK file", "*.BRIK")])
+                    filetypes=[("AFNI HEAD file", "*.HEAD"),])
+#                               ("AFNI BRIK file", "*.BRIK")])
             # Remove the file extension
-            self.vol_file = os.path.splitext(self.vol_file)[0]
+#            self.vol_file = os.path.splitext(self.vol_file)[0]
             self.vol_var.set(self.vol_file)
             pass
     def body(self, root, dset_path):
@@ -155,16 +155,18 @@ class LocalSpecAndVolWindow(Dialog):
 class MainWindow:
     def begin_session(self):
         set_state(self.root, 'disabled')
+        set_state(self.switch_button, 'enabled')
         self.real_root.withdraw()
-        if not self.net_thread.authenticated:
+        # If we're not connected, we need to choose a local dataset or server
+        if self.net_thread and self.net_thread.authenticated:
+            mode = 'server'
+        else:
             init_dialog = tk.Toplevel()
             init_dialog.title("COVI: Choose data source")
             init = InitWindow(init_dialog, self.net_thread)
             center_window(init_dialog)
             root.wait_window(init_dialog)
             mode = init.mode
-        else:
-            mode = 'server'
 
         if mode == 'server':
             dset_dialog = ServerDsetWindow(self.real_root,
@@ -178,7 +180,18 @@ class MainWindow:
                     dset_name = self.dset
                 tkMessageBox.showinfo("We have a dataset!", "It's %s!"%(dset_name))
             
+            # Get surfaces from the server
+            #TODO: Handle failure in job queue
+            self.net_thread.job_q.put(["surface"], True, 5)
+            
+            #TODO: Start an animation - ttk.Progressbar
+            self
+            
+            
             #TODO: Get the surface from the server
+            
+            # Re-enable main window widgets
+            set_state(self.real_root, 'enabled')
             
         elif mode == 'local':
             self.dset = init.dset_var.get()
@@ -195,19 +208,26 @@ class MainWindow:
                                                     surfvol_file=self.vol_file,
                                                     dset = self.dset)
                 self.proc_thread.start()
+                
+                # Re-enable main window widgets
+                set_state(self.real_root, 'enabled')
             
         
-        set_state(self.real_root, 'enabled')
+        
         self.real_root.deiconify()
         
     
     def __init__(self, real_root):
-        # Set up a network thread
-        self.net_thread = NetworkThread()
-        self.net_thread.start()
+        self.proc_thread = False
+        self.net_thread = False
         self.real_root = real_root
         self.real_root.resizable(0,0)
         self.real_root.title("COVI")
+        self.menu_vars = []
+        
+        self.real_root.protocol("WM_DELETE_WINDOW", self.cleanup)
+        
+        # Put all of our widgets inside a frame, not the Toplevel object
         self.root = ttk.Frame(real_root)
         root = self.root
         root.pack(fill=tk.BOTH, expand=tk.YES)
@@ -216,11 +236,33 @@ class MainWindow:
         #    text="I'm the main window!\nWhen I grow up, I'll be full of widgets!")
         #rootlabel.pack()
         center_window(real_root)
+        set_state(self.root, 'disabled')
+        set_state(self.switch_button, 'enabled')
 
         self.begin_session()
+    
+    def cleanup(self):
+        if self.net_thread:
+            self.net_thread.job_q.put_nowait(["close"])
+            self.net_thread.job_q.put_nowait(["die"])
+        if self.proc_thread:
+            self.proc_thread.job_q.put_nowait(["die"])
+        self.real_root.quit()
+                                            
+    def proc_not_ready(self):
+        '''
+        What to do if no dataset is loaded into SUMA.
+        Disable interface widgets that won't work without SUMA 
+        and display a message.
+        '''
+        set_state(self.root, 'disabled')
+        set_state(self.switch_button, 'enabled')
+        tkMessageBox.showwarning("Warning", 
+             "A dataset needs to be loaded into SUMA to do that.")
         
-    def scale_command(self, event):
-        self.threshold_label['text'] = str(self.threshold.get())
+    def scale_command(self, event=None):
+        threshold = self.threshold.get()
+        self.threshold_label['text'] = str(threshold)
         
     def switch_command(self):
         '''
@@ -232,51 +274,140 @@ class MainWindow:
     def open_command(self):
         pass
     
-    def mode_command(self):
-        pass
+    def mode_command(self, mode):
+        if self.proc_thread and self.proc_thread.ready():
+            self.proc_thread.job_q.put_nowait(["shape", mode])
+        else:
+            self.proc_not_ready()
+            
     
-    def color_command(self):
-        pass
-    
+    def color_command(self, color):
+        if self.proc_thread and self.proc_thread.ready():
+            self.proc_thread.job_q.put_nowait(["color", color])
+        else:
+            self.proc_not_ready()
     def redraw_command(self):
-        pass
+        if self.proc_thread and self.proc_thread.ready():
+            threshold = float(self.threshold.get())
+            # Avoid divide by zero error
+            threshold = max(threshold, 10**-9)
+            self.proc_thread.job_q.put_nowait(["threshold", 
+                float(self.threshold.get())/100.])
+            self.proc_thread.job_q.put_nowait(["redraw"])
+        else:
+            self.proc_not_ready()
+            
+    def relaunch_command(self):
+        if self.proc_thread and self.proc_thread.ready():
+            self.proc_thread.job_q.put_nowait(['suma'])
+        else:
+            self.proc_not_ready()
+            
+    def make_mode_menu(self, root_menu):
+        mode_menu = tk.Menu(root_menu, tearoff=0)
+        mode_menu.add_radiobutton(label="Paths", 
+                command=lambda: self.mode_command("paths"))
+        mode_menu.add_radiobutton(label="Spheres", 
+                command=lambda: self.mode_command("spheres"))
+        temp = tk.StringVar()
+        mode_menu.add_radiobutton(label="Sized Spheres", 
+                command=lambda: self.mode_command("sized spheres"),
+                variable = temp, value="default")
+        temp.set("default")
+        self.menu_vars.append(temp)
+        return mode_menu
+        
+    def make_color_menu(self, root_menu):
+        color_menu = tk.Menu(self.edit_menu,tearoff=0)
+        temp = tk.StringVar()
+        temp.set("default")
+        color_menu.add_radiobutton(label="Heatmap", 
+                command=lambda: self.color_command("heat"),
+                variable=temp, value="default")
+        color_menu.add_radiobutton(label="Location-based", 
+                command=lambda: self.color_command("brightness"),
+                variable=temp)
+        self.menu_vars.append(temp)
+        return color_menu
         
     def body(self):
         self.threshold = tk.IntVar(0)
+        self.menu = tk.Menu()
+        
+        self.file_menu = tk.Menu(self.menu, tearoff=0)
+        self.file_menu.add_command(label="Open dataset/Connect to server",
+                                   command=self.begin_session)
+        self.file_menu.add_separator()
+        self.file_menu.add_command(label="Quit", command=self.cleanup)
+        self.menu.add_cascade(label="File", menu=self.file_menu)
+        
+        self.edit_menu = tk.Menu(self.menu, tearoff=0)
+        
+        
+        self.edit_menu.add_cascade(label="Graph mode", 
+                menu=self.make_mode_menu(self.edit_menu))
+        
+        self.edit_menu.add_cascade(label="Color mode", 
+                menu=self.make_color_menu(self.edit_menu)) 
+        
+        
+        self.edit_menu.add_command(label="Relaunch SUMA", 
+                                   command=self.relaunch_command)
+        self.edit_menu.add_command(label="Preferences", 
+                                   command=self.color_command)
+        self.menu.add_cascade(label="Edit", menu=self.edit_menu)
+        
+        self.real_root.config(menu=self.menu)
+        
+        
         self.scale = ttk.Scale(self.root, from_=100, to=0, 
                                variable=self.threshold,
                                orient=tk.VERTICAL,
                                command=self.scale_command)
+        self.threshold.set(50)
         self.scale.grid(column=0, row=0, rowspan=6, sticky=(tk.N+tk.S),
                         padx='3m', pady='1m')
         self.threshold_label = ttk.Label(self.root, text="0", justify=tk.LEFT)
         self.threshold_label.grid(column=0, row=6)
+        self.scale_command()
         
         self.node_label = ttk.Label(self.root, text="Node")
-        self.node_label.grid(column=1, row=0, sticky=tk.W)
+        self.node_label.grid(column=1, row=0, sticky=tk.W+tk.E, padx='1m')
         self.node_num = tk.IntVar(0) 
         self.number_label = ttk.Label(self.root, text='%i'%0, width='6',
                                       relief=tk.SUNKEN, justify=tk.RIGHT)
-        self.number_label.grid(column=1, row=1, sticky=tk.W+tk.E, padx='0.6m')
+        self.number_label.grid(column=1, row=1, sticky=tk.W+tk.E, padx='1m')
         
         self.switch_button = ttk.Button(self.root, text= "Switch\nDataset",
                                         command=self.switch_command)
-        self.switch_button.grid(column=1, row=2)
+        self.switch_button.grid(column=1, row=2, sticky=tk.W+tk.E, padx='1m')
         self.open_button = ttk.Button(self.root, text= "Open\nDataset",
                                         command=self.open_command)
-        self.open_button.grid(column=1, row=3)
-        self.mode_button = ttk.Button(self.root, text= "Graph\nMode",
-                                        command=self.mode_command)
-        self.mode_button.grid(column=1, row=4)
-        self.color_button = ttk.Button(self.root, text= "Color\nMode",
-                                        command=self.color_command)
-        self.color_button.grid(column=1, row=5)
+        self.open_button.grid(column=1, row=3, sticky=tk.W+tk.E, padx='1m')
+        self.mode_button = ttk.Menubutton(self.root, text= "Graph\nMode")
+        self.mode_button['menu'] = self.make_mode_menu(self.mode_button)
+        self.mode_button.grid(column=1, row=4, sticky=tk.W+tk.E, padx='1m')
+        self.color_button = ttk.Menubutton(self.root, text= "Color\nMode")
+        self.color_button['menu'] = self.make_color_menu(self.color_button)
+        self.color_button.grid(column=1, row=5, sticky=tk.W+tk.E, padx='1m')
         self.redraw_button = ttk.Button(self.root, text= "Redraw",
                                         command=self.redraw_command)
         self.redraw_button.grid(column=0, row=7, sticky=(tk.W+tk.E), 
                                 columnspan=2, padx='1m')
-        
         add_padding(self.root)
+        
+        # TODO: add menu bar
+        """
+        File
+        Open dataset/Connect to server
+        Quit
+        
+        Edit
+        Change Graph Mode
+        Relaunch SUMA
+        Preferences
+        
+        """
         
 class NetworkDialog(object):
     #TODO: Test data validation
@@ -298,6 +429,8 @@ class NetworkDialog(object):
         if wait == False:
             return False
 
+        # Go through responses ffrom the server until we find the 
+        # one that we want
         while True:
             # Validate the response
             if expected == 'req ok' and res == True:

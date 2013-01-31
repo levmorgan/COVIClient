@@ -1,14 +1,19 @@
-'''path
+'''
 Created on Nov 28, 2012
 
 @author: morganl
 '''
 import itertools, subprocess, socket, re, signal, sys, os
-from math import sqrt
+#from math import sqrt
 from threading import Thread
 from Queue import Queue, Empty
 class ProcessingThread(Thread):
-        
+    
+    def ready(self):
+        '''
+        Return True if there is an established SUMA session
+        '''
+        return hasattr(self, "suma") and self.suma.poll() == None
     
     def __init__(self, spec_file, surfvol_file, dset):
         '''
@@ -23,6 +28,7 @@ class ProcessingThread(Thread):
         self.job_q = Queue()
         self.res_q = Queue()
         self.cont = True
+        self.threshold = 0.5
         
         # Set default shape and color mode
         self.shape = 'sized spheres'
@@ -30,109 +36,103 @@ class ProcessingThread(Thread):
         self.shapes = itertools.cycle(['paths', "spheres", "sized spheres"])
         self.colors = itertools.cycle(["brightness", "heat"])
 
+
+    def launch_suma_connect(self):
+        '''
+        Launch SUMA, initiate a NIML connection, and load the surface that 
+        SUMA is loading 
+        '''
+        # SUMA has a bug with spaces in the path to surfvol, so set the cwd
+        # to the surfvol directory.
+        cwd, surfvol = os.path.split(self.surfvol_file)
+        self.suma = subprocess.Popen(["/home/morganl/workspace/AFNI/Debug/afni_src/suma", 
+                "-spec", self.spec_file, 
+                "-sv", surfvol, 
+                "-niml", 
+                "-ah", "127.0.0.1", 
+                "-np", "53211"], cwd=cwd)
+        
+    #                    stderr=subprocess.PIPE,
+    #                    stdout=subprocess.PIPE)
+    # TODO: Add a message telling the user to press 't' in SUMA
+        self.svr_socket.listen(5)
+    # Tell SUMA to initiate the NIML connection
+        """
+    print ' '.join(["/home/morganl/workspace/AFNI/Debug/afni_src/DriveSuma",
+                "-com", "viewer_cont", "-key", "'t'", "-np", "53211"])
+    
+    sleep(1)
+    DriveSuma = subprocess.Popen(["/home/morganl/workspace/AFNI/Debug/afni_src/DriveSuma",
+                "-com", "viewer_cont", "-key", "'t'", "-np", "53211"])
+    
+    DriveSuma = subprocess.Popen(["/home/morganl/workspace/AFNI/Debug/afni_src/DriveSuma",
+                "-com", "viewer_cont", "-key", "'t'"])
+    print 'Sent key to SUMA'
+    """
+        print "Waiting for connection from SUMA"
+        self.svr_socket.settimeout(60)
+        self.socket, address = self.svr_socket.accept()
+        self.socket.settimeout(0.5)
+        print "Connection accepted"
+    # Receive the big chunk of data SUMA sends on connect
+        print "Starting to receive data"
+        data = self.recv_data()
+        print "Data chunk received"
+    # Parse info out of the data we received
+        num_nodes, self.volume_idcode, self.surface_idcode, self.surface_label = re.findall("""<SUMA_ixyz\n  ni_form="binary.lsbfirst"\n  ni_type="int,3\*float"\n  ni_dimen="([0-9]+?)"\n  volume_idcode="(.*?)"\n  surface_idcode="(.*?)".*\n  surface_label="(.*?)".*""", data, flags=re.DOTALL)[0]
+        self.num_nodes = int(num_nodes)
+    # Decode the cluster file
+    # Load the cluster information
+        try:
+            print "Starting to read clusters"
+            clust_fi = open(os.path.join(self.dset_path, 'clusters.1D'))
+            clust_dat = clust_fi.read().split('\n')
+            clust_fi.close() # Preallocate the cluster array
+            self.clust = range(self.num_nodes) # Draw the graphic for each cluster at the first node in the cluster
+            self.draw_here = []
+            cluster = 0
+            first = True
+            for i in clust_dat:
+            # Empty lines signify a new cluster
+                if i == '':
+                    cluster += 1
+                    first = True
+                else:
+                    try:
+                        self.clust[int(i)] = cluster
+                        if first:
+                            self.draw_here.append(int(i))
+                            first = False
+                    except IndexError:
+                        print "Index error:"
+                        print "int(i) == %i" % (int(i))
+                        print "len(clust) == %i" % (len(self.clust))
+            
+    #            assert cluster[-1] ==
+            print 'Loaded cluster file ok'
+        except os.error:
+            print "ERROR: Could not open cluster file"
+            sys.exit(1)
+    # Send the reply we need to get things started
+    #TODO: Error in reply. Why?
+        self.socket.send('<SUMA_irgba\n  surface_idcode="%s"\n  ' % (self.surface_idcode) + 'local_domain_parent_ID="%s"\n  ' % (self.surface_idcode) + 'volume_idcode="%s"\n  ' % (self.volume_idcode) + 'function_idcode="%s"\n  threshold="0" />' % (self.volume_idcode))
+    #FIXME: Read in the surface file from disk, no time for NIDO right now
+        self.load_surface(os.path.join(os.path.split(self.spec_file)[0], 
+                                       self.surface_label))
+
     def run(self):
         self.svr_socket = socket.socket(socket.AF_INET, 
                                     socket.SOCK_STREAM)
         self.svr_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.svr_socket.bind(("127.0.0.1", 53211))
-        self.suma = subprocess.Popen(["/home/morganl/workspace/AFNI/Debug/afni_src/suma", 
-                    "-spec", self.spec_file, 
-                    "-sv", self.surfvol_file,
-                    "-niml", 
-                    "-ah", "127.0.0.1",
-                    "-np", "53211"],)
-#                    stderr=subprocess.PIPE,
-#                    stdout=subprocess.PIPE)
-
-        # TODO: Add a message telling the user to press 't' in SUMA
-        
-        self.svr_socket.listen(5)
-        # Tell SUMA to initiate the NIML connection
-        """
-        print ' '.join(["/home/morganl/workspace/AFNI/Debug/afni_src/DriveSuma",
-                    "-com", "viewer_cont", "-key", "'t'", "-np", "53211"])
-        
-        sleep(1)
-        DriveSuma = subprocess.Popen(["/home/morganl/workspace/AFNI/Debug/afni_src/DriveSuma",
-                    "-com", "viewer_cont", "-key", "'t'", "-np", "53211"])
-        
-        DriveSuma = subprocess.Popen(["/home/morganl/workspace/AFNI/Debug/afni_src/DriveSuma",
-                    "-com", "viewer_cont", "-key", "'t'"])
-        print 'Sent key to SUMA'
-        """
-        print "Waiting for connection from SUMA"
-        self.socket, address = self.svr_socket.accept()
-        self.socket.settimeout(1)
-        print "Connection accepted"
-        
-        
-        # Receive the big chunk of data SUMA sends on connect
-        print "Starting to receive data"
-        data = self.recv_data()
-        
-        print "Data chunk received"
-        
-        # Parse info out of the data we received 
-        num_nodes, self.volume_idcode, self.surface_idcode, self.surface_label = re.findall(
-            """<SUMA_ixyz\n  ni_form="binary.lsbfirst"\n  ni_type="int,3\*float"\n  ni_dimen="([0-9]+?)"\n  volume_idcode="(.*?)"\n  surface_idcode="(.*?)".*\n  surface_label="(.*?)".*""",
-              data, flags=re.DOTALL)[0]
-        self.num_nodes = int(num_nodes) 
-        
-        # Decode the cluster file
-        # Load the cluster information
-        try:
-            print "Starting to read clusters"
-            clust_fi = open(os.path.join(self.dset_path, 'clusters.1D'))
-            clust_dat = clust_fi.read().split('\n')
-            clust_fi.close()
-            # Preallocate the cluster array
-            self.clust = range(self.num_nodes)
-            # Draw the graphic for each cluster at the first node in the cluster
-            self.draw_here = []
-            cluster = 0
-            first = True
-            for i in clust_dat:
-                # Empty lines signify a new cluster
-                if i == '':
-                    cluster += 1
-                    first = True
-                    continue
-                try:
-                    self.clust[int(i)] = cluster
-                    if first:
-                        self.draw_here.append(int(i))
-                        first = False
-                except IndexError:
-                    print "Index error:"
-                    print "int(i) == %i"%(int(i))
-                    print "len(clust) == %i"%(len(self.clust))
-
-#            assert cluster[-1] == 
-            print 'Loaded cluster file ok'
-        except os.error:
-            print "ERROR: Could not open cluster file"
-            sys.exit(1)
-        
-        # Send the reply we need to get things started
-        #TODO: Error in reply. Why?
-        sys.stdout.write('<SUMA_irgba\n  surface_idcode="%s"\n  '%(self.surface_idcode)+
-        'local_domain_parent_ID="%s"\n  '%(self.surface_idcode)+
-        'volume_idcode="%s"\n  '%(self.volume_idcode)+
-        'function_idcode="%s"\n  threshold="0" />'%(self.volume_idcode))
-        self.socket.send(
-        '<SUMA_irgba\n  surface_idcode="%s"\n  '%(self.surface_idcode)+
-        'local_domain_parent_ID="%s"\n  '%(self.surface_idcode)+
-        'volume_idcode="%s"\n  '%(self.volume_idcode)+
-        'function_idcode="%s"\n  threshold="0" />'%(self.volume_idcode))
-        
-        #FIXME: Read in the surface file from disk, no time for NIDO right now
-        self.load_surface(os.path.join(os.path.split(spec_file)[0], self.surface_label)) 
+        self.launch_suma_connect()
         
         # Start the main loop
         while self.cont:
             # Alternately check the socket and command queue 
             try:
                 # Check for mouse clicks in SUMA 
+#                dat = self.recv_data()
                 dat = self.recv_data()
                 if dat:
                     self.last_dat = dat
@@ -144,17 +144,25 @@ class ProcessingThread(Thread):
             
             try:
                 cmd = self.job_q.get_nowait()
-                self.handle_cmd(cmd)
+                if cmd:
+                    print "Got a command: ",
+                    print cmd
+                    self.handle_cmd(cmd)
+                    self.job_q.task_done()
             except Empty:
                 pass
+        self.svr_socket.close()
                 
     def handle_mouse_click(self, dat, force_update=False):
+        if force_update == True:
+            print "Redrawing"
         try:
             self.surface_nodeid, self.surface_idcode, surface_label = re.findall("""<SUMA_crosshair_xyz\n  ni_type="float"\n  ni_dimen="3"\n  surface_nodeid="([0-9\.]+?)"\n  surface_idcode="(.*?)"\n  surface_label="(.*?)" >""", dat, flags=re.DOTALL)[0]
             # If surface label is different, load the new surface
             if surface_label != self.surface_label:
                 self.surface_label = surface_label
-                self.load_surface(os.path.join(os.path.split(spec_file)[0], self.surface_label))
+                self.load_surface(os.path.join(os.path.split(self.spec_file)[0], 
+                                               self.surface_label))
                 print "Loaded new surface"
             self.surface_nodeid = int(self.surface_nodeid)
             selected_cluster = self.clust[self.surface_nodeid]
@@ -181,6 +189,7 @@ class ProcessingThread(Thread):
                     #TODO: Handle a file error
                     raise
                 self.send_displayable_object(self.surface_nodeid, matrix)
+                print "Sent DO"
             else:
                 print "Same cluster selected" #                                                     [[i, uniform(0,1)]
                     #                                                         for i in clusters])
@@ -196,7 +205,6 @@ class ProcessingThread(Thread):
         '''
         Recieve data of indeterminate length and return it
         '''
-        
         dat_array = []
         dat = self.socket.recv(1024)
         while dat:
@@ -214,16 +222,38 @@ class ProcessingThread(Thread):
         Handle a command from some other part of the program
         '''
         #TODO: Finish handle command method
-
-        if cmd[0] == 'threshold':
-            self.threshold = cmd[1]
-            self.redraw()
-        elif cmd[0] == 'shape':
-            self.shape = cmd[1]
-        elif cmd[0] == 'color':
-            self.color == cmd[1]
-        elif cmd[0] == 'die':
-            self.cont = False
+        
+        if cmd[0] == 'suma':
+            try:
+                self.res_q.put_nowait(
+                    self.launch_suma_connect())
+            except Exception as e:
+                self.res_q.put_nowait(e)
+        elif self.ready():
+            if cmd[0] == 'threshold':
+                self.threshold = cmd[1]
+            elif cmd[0] == 'shape':
+                self.shape = cmd[1]
+            elif cmd[0] == 'color':
+                self.color = cmd[1]
+            elif cmd[0] == 'redraw':
+                try:
+                    """
+                    self.res_q.put_nowait(
+                        self.redraw())
+                        """
+                    print "Got redraw command"
+                    self.redraw()
+                except Exception as e:
+                    print "Exception during redraw: ",
+                    print e
+#                    self.res_q.put_nowait(e)
+            elif cmd[0] == 'die':
+                self.cont = False
+        else:
+            print "Got an invalid command: ",
+            print cmd
+            return 
 
     """
     def interp_parabola(self, p1, p2, normal, height, n=20):
@@ -365,7 +395,6 @@ class ProcessingThread(Thread):
 #        color = 'heat'
         
         # Function to normalize thresholded values
-        self.threshold = 0.5
         #norm = lambda x, t=self.threshold: (1./t)*x-((1./t)-1.)
         norm = lambda x, t=self.threshold: (x+t-1.)/t
         # TODO: Make path generation use filtered_matrix

@@ -6,6 +6,7 @@ from traceback import print_exc
 class NetworkThread(threading.Thread):
     def __init__(self):
         super(NetworkThread, self).__init__()
+        self.cont = True
         self.job_q = Queue()
         self.res_q = Queue()
 
@@ -38,7 +39,7 @@ class NetworkThread(threading.Thread):
         self.authenticated = authed
 
     def run(self):
-        while True:
+        while self.cont:
             # Take a job off the job queue, 
             # blocking if it's empty
             job = self.job_q.get()
@@ -52,6 +53,9 @@ class NetworkThread(threading.Thread):
                     print_exc()
                     self.res_q.put(e)
                     continue
+            elif job[0] == 'die':
+                self.cont = False
+                self.sock.close()
             else:
                 try:
                     res = self.dispatch[job[0]](self.sock, *job[1:])
