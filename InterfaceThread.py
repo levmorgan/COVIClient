@@ -178,17 +178,15 @@ class MainWindow:
                     dset_name = '/'.join(self.dset)
                 else:
                     dset_name = self.dset
-                tkMessageBox.showinfo("We have a dataset!", "It's %s!"%(dset_name))
-            
-            # Get surfaces from the server
-            #TODO: Handle failure in job queue
-            self.net_thread.job_q.put(["surface"], True, 5)
-            
-            #TODO: Start an animation - ttk.Progressbar
-            self
-            
-            
-            #TODO: Get the surface from the server
+                
+                if type(self.dset) == list:
+                    self.proc_thread = ProcessingThread(dset=self.dset[1], 
+                        net_thread=self.net_thread, owner=self.dset[0])
+                else:
+                    self.proc_thread = ProcessingThread(dset=self.dset, 
+                        net_thread=self.net_thread)
+                    
+                self.proc_thread.start()
             
             # Re-enable main window widgets
             set_state(self.real_root, 'enabled')
@@ -206,7 +204,7 @@ class MainWindow:
                 self.vol_file = sv_window.vol_file
                 self.proc_thread = ProcessingThread(spec_file=self.spec_file,
                                                     surfvol_file=self.vol_file,
-                                                    dset = self.dset)
+                                                    dset_path = self.dset)
                 self.proc_thread.start()
                 
                 # Re-enable main window widgets
@@ -215,11 +213,10 @@ class MainWindow:
         
         
         self.real_root.deiconify()
-        
     
     def __init__(self, real_root):
         self.proc_thread = False
-        self.net_thread = False
+        self.net_thread = NetworkThread()
         self.real_root = real_root
         self.real_root.resizable(0,0)
         self.real_root.title("COVI")
@@ -240,7 +237,26 @@ class MainWindow:
         set_state(self.switch_button, 'enabled')
 
         self.begin_session()
+        self.poll()
     
+    def poll(self):
+        '''
+        Check for events from SUMA.
+        '''
+        if self.proc_thread and self.proc_thread.ready():
+            try:
+                res = self.proc_thread.res_q.get_nowait()
+                self.proc_thread.res_q.task_done()
+                if res:
+                    if res[0] == 'node':
+                        self.node_number_label['text'] = '%i'%res[1]
+                    if res[0] == 'cluster':
+                        self.cluster_number_label['text'] = '%i'%res[1]
+            except Empty:
+                pass
+        
+        self.root.after(100, self.poll)
+        
     def cleanup(self):
         if self.net_thread:
             self.net_thread.job_q.put_nowait(["close"])
@@ -268,7 +284,12 @@ class MainWindow:
         '''
         Switch datasets
         '''
-        self.begin_session()
+        answer = tkMessageBox.askyesno("Warning", 
+            "This will end your current COVI session. Continue?")
+        if answer:
+            if self.proc_thread:
+                self.proc_thread.job_q.put_nowait(["die"])
+            self.begin_session()
             
     
     def open_command(self):
@@ -304,30 +325,41 @@ class MainWindow:
             self.proc_not_ready()
             
     def make_mode_menu(self, root_menu):
+        '''
+        Make a menu to choose among graph modes.
+        '''
+        if not hasattr(self, "mode_var"):
+            self.mode_var = tk.StringVar()
+            self.mode_var.set("sized spheres")
         mode_menu = tk.Menu(root_menu, tearoff=0)
-        mode_menu.add_radiobutton(label="Paths", 
-                command=lambda: self.mode_command("paths"))
-        mode_menu.add_radiobutton(label="Spheres", 
-                command=lambda: self.mode_command("spheres"))
-        temp = tk.StringVar()
-        mode_menu.add_radiobutton(label="Sized Spheres", 
+        mode_menu.add_radiobutton(label="Paths", variable=self.mode_var,
+                command=lambda: self.mode_command("paths"),
+                value="paths")
+        mode_menu.add_radiobutton(label="Spheres", variable=self.mode_var,
+                command=lambda: self.mode_command("spheres"),
+                value="spheres")
+        mode_menu.add_radiobutton(label="Sized Spheres", variable=self.mode_var,
                 command=lambda: self.mode_command("sized spheres"),
-                variable = temp, value="default")
-        temp.set("default")
-        self.menu_vars.append(temp)
+                value="sized spheres")
         return mode_menu
         
     def make_color_menu(self, root_menu):
+        '''
+        Make a menu to choose among color modes.
+        '''
+        if not hasattr(self, "mode_var"):
+            self.mode_var = tk.StringVar()
+        
+        if not hasattr(self, "color_var"):
+            self.color_var = tk.StringVar()
+            self.color_var.set("heat")
         color_menu = tk.Menu(self.edit_menu,tearoff=0)
-        temp = tk.StringVar()
-        temp.set("default")
         color_menu.add_radiobutton(label="Heatmap", 
                 command=lambda: self.color_command("heat"),
-                variable=temp, value="default")
+                variable=self.color_var, value="heat")
         color_menu.add_radiobutton(label="Location-based", 
                 command=lambda: self.color_command("brightness"),
-                variable=temp)
-        self.menu_vars.append(temp)
+                variable=self.color_var, value="brightness")
         return color_menu
         
     def body(self):
@@ -373,41 +405,39 @@ class MainWindow:
         
         self.node_label = ttk.Label(self.root, text="Node")
         self.node_label.grid(column=1, row=0, sticky=tk.W+tk.E, padx='1m')
-        self.node_num = tk.IntVar(0) 
-        self.number_label = ttk.Label(self.root, text='%i'%0, width='6',
+         
+        self.node_number_label = ttk.Label(self.root, text='%i'%0, width='6',
                                       relief=tk.SUNKEN, justify=tk.RIGHT)
-        self.number_label.grid(column=1, row=1, sticky=tk.W+tk.E, padx='1m')
+        self.node_number_label.grid(column=1, row=1, sticky=tk.W+tk.E, padx='1m')
         
-        self.switch_button = ttk.Button(self.root, text= "Switch\nDataset",
-                                        command=self.switch_command)
-        self.switch_button.grid(column=1, row=2, sticky=tk.W+tk.E, padx='1m')
+        
+        self.cluster_label = ttk.Label(self.root, text="Cluster")
+        self.cluster_label.grid(column=1, row=2, sticky=tk.W+tk.E, padx='1m')
+         
+        self.cluster_number_label = ttk.Label(self.root, text='%i'%0, width='6',
+                                      relief=tk.SUNKEN, justify=tk.RIGHT)
+        self.cluster_number_label.grid(column=1, row=3, sticky=tk.W+tk.E, padx='1m')
+
+        """
         self.open_button = ttk.Button(self.root, text= "Open\nDataset",
                                         command=self.open_command)
         self.open_button.grid(column=1, row=3, sticky=tk.W+tk.E, padx='1m')
+        """
+        self.switch_button = ttk.Button(self.root, text= "Switch\nDataset",
+                                        command=self.switch_command)
+        self.switch_button.grid(column=1, row=4, sticky=tk.W+tk.E, padx='1m')
         self.mode_button = ttk.Menubutton(self.root, text= "Graph\nMode")
         self.mode_button['menu'] = self.make_mode_menu(self.mode_button)
-        self.mode_button.grid(column=1, row=4, sticky=tk.W+tk.E, padx='1m')
+        self.mode_button.grid(column=1, row=5, sticky=tk.W+tk.E, padx='1m')
         self.color_button = ttk.Menubutton(self.root, text= "Color\nMode")
         self.color_button['menu'] = self.make_color_menu(self.color_button)
-        self.color_button.grid(column=1, row=5, sticky=tk.W+tk.E, padx='1m')
+        self.color_button.grid(column=1, row=6, sticky=tk.W+tk.E, padx='1m')
         self.redraw_button = ttk.Button(self.root, text= "Redraw",
                                         command=self.redraw_command)
         self.redraw_button.grid(column=0, row=7, sticky=(tk.W+tk.E), 
                                 columnspan=2, padx='1m')
         add_padding(self.root)
         
-        # TODO: add menu bar
-        """
-        File
-        Open dataset/Connect to server
-        Quit
-        
-        Edit
-        Change Graph Mode
-        Relaunch SUMA
-        Preferences
-        
-        """
         
 class NetworkDialog(object):
     #TODO: Test data validation
@@ -415,7 +445,11 @@ class NetworkDialog(object):
         '''
         Get the response from the server, handling missing or incorrect responses
         '''
-        res = self.net_thread.res_q.get(True, 5)
+        try:
+            res = self.net_thread.res_q.get(True, 5)
+        except Empty:
+            res = None
+        
         wait = True
         while wait and not res:
             try:
@@ -429,7 +463,7 @@ class NetworkDialog(object):
         if wait == False:
             return False
 
-        # Go through responses ffrom the server until we find the 
+        # Go through responses from the server until we find the 
         # one that we want
         while True:
             # Validate the response
@@ -462,6 +496,7 @@ class InitWindow(NetworkDialog):
         '''
         super(InitWindow, self).__init__()
         self.net_thread = net_thread
+        self.net_thread.start()
         self.real_root = real_root
         self.real_root.resizable(0,0)
         self.root = ttk.Frame(real_root)
@@ -649,7 +684,8 @@ class InitWindow(NetworkDialog):
             self.net_thread.job_q.put(
                 ['connect', self.addr_var.get(), int(self.port_var.get())])
             # TODO: start an animation
-            res = self.recv_response()
+#            res = self.net_thread.recv_response()
+            res = self.net_thread.recv_response()
             # TODO: stop animation
             res = handle_net_response(res, "Connection")
             if not res:
@@ -662,7 +698,7 @@ class InitWindow(NetworkDialog):
                 ['auth', self.user_var.get(), self.pass_var.get()])
             # TODO: start an animation
             print "Got auth response"
-            res = self.recv_response()
+            res = self.net_thread.recv_response()
             # TODO: stop animation
             res = handle_net_response(res, "Authentication")
             if not res:
@@ -706,7 +742,7 @@ class ServerDsetWindow(Dialog, NetworkDialog):
             
             #Make sure the rename succeeded
             #TODO: Start and stop animation
-            res = self.recv_response()
+            res = self.net_thread.recv_response()
             handle_net_response(res, "Rename")
             if res:
                 self.update_tree()
@@ -749,7 +785,7 @@ class ServerDsetWindow(Dialog, NetworkDialog):
                 return
             self.net_thread.job_q.put_nowait(["share_response", dset, owner, 0])
         #TODO: Start and stop animation
-        res = self.recv_response()
+        res = self.net_thread.recv_response()
         handle_net_response(res, "Deletion")
         if res:
             self.update_tree()
@@ -777,7 +813,7 @@ class ServerDsetWindow(Dialog, NetworkDialog):
                     ["copy_shared", old, new, owner])
             
             # TODO: Start an animation
-            res = self.recv_response()
+            res = self.net_thread.recv_response()
             handle_net_response(res, "Copying")
             self.update_tree()
             
@@ -804,7 +840,7 @@ class ServerDsetWindow(Dialog, NetworkDialog):
         #TODO: Add re-sharing of shared datasets
         
         #TODO: Start and stop animation
-        res = self.recv_response()
+        res = self.net_thread.recv_response()
         handle_net_response(res, "Sharing")
         if res:
             self.update_tree()
@@ -819,7 +855,7 @@ class ServerDsetWindow(Dialog, NetworkDialog):
             owner, dset = item_details['values']
             self.net_thread.job_q.put_nowait(["share_response", dset, owner, 1])
             #TODO: Start and stop animation
-            res = self.recv_response()
+            res = self.net_thread.recv_response()
             handle_net_response(res, "Response Acceptance")
             if res:
                 self.update_tree()
@@ -923,7 +959,7 @@ class ServerDsetWindow(Dialog, NetworkDialog):
         # Get a list of datasets to populate the tree
         self.net_thread.job_q.put(['list'])
         # TODO: start animation
-        res = self.recv_response('list')
+        res = self.net_thread.recv_response('list')
         # TODO: stop animation
         handle_net_response(res, "Dataset Retrieval")
         if not res:

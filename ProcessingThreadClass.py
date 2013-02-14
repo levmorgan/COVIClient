@@ -3,10 +3,13 @@ Created on Nov 28, 2012
 
 @author: morganl
 '''
-import itertools, subprocess, socket, re, signal, sys, os
+import itertools, subprocess, socket, re, signal, sys, os, time
+from traceback import print_exc
 #from math import sqrt
 from threading import Thread
 from Queue import Queue, Empty
+from tempfile import mkdtemp
+import tkMessageBox
 class ProcessingThread(Thread):
     
     def ready(self):
@@ -15,15 +18,51 @@ class ProcessingThread(Thread):
         '''
         return hasattr(self, "suma") and self.suma.poll() == None
     
-    def __init__(self, spec_file, surfvol_file, dset):
+    def __init__(self, 
+                 # Args for client mode
+                 spec_file=None, surfvol_file=None, dset_path=None,
+                 # Args for server mode 
+                 dset=None, net_thread=None, owner=None):
         '''
-        Constructor
+        Constructor. Can take two sets of arguments to operate 
+        in client or server mode.
+        
+        Client mode:
+        spec_file: The path to a SUMA spec file
+        surfvol_file: The path to an AFNI HEAD file
+        dset_path: The path to a directory containing a clusters.1D 
+                   and .stat.1D files
+        
+        Server mode:
+        dset: The name of the dataset to request from the server
+        net_thread: A COVI network thread connected to the server
+        owner: The dataset's owner, if it's a shared dataset. 
         '''
         Thread.__init__(self)
-        self.spec_file = spec_file
-        self.surfvol_file = surfvol_file
+        
+        if spec_file and surfvol_file and dset_path:
+            self.spec_file = spec_file
+            self.surfvol_file = surfvol_file
+            self.dset_path = dset_path
+            self.mode = 'local'
+        
+        elif dset and net_thread:
+            print "dset: %s"%(dset)
+            self.dset = dset
+            self.net_thread = net_thread
+            if owner:
+                self.owner = owner
+            else:
+                self.owner = False
+            self.mode = "server"
+        
+        else:
+            raise ValueError("ProcessingThreadClass needs the arguments:\n"+
+                             "spec_file, surfvol_file, and dset_path to "+
+                             "operate in client mode, or:\n"+
+                             "dset and net_thread to operate in server mode.")
+        
         self.do_file = 'shapes'
-        self.dset_path = dset
         self.selected_cluster = None
         self.job_q = Queue()
         self.res_q = Queue()
@@ -36,12 +75,134 @@ class ProcessingThread(Thread):
         self.shapes = itertools.cycle(['paths', "spheres", "sized spheres"])
         self.colors = itertools.cycle(["brightness", "heat"])
 
+    def get_matrix(self, cluster_num):
+        if self.mode == 'server':
+            self.net_thread.job_q.put(["matrix", self.dset, cluster_num])
+            raw_matrix = self.net_thread.recv_response(expected='binary')
+            if not raw_matrix:
+                return None
+            raw_matrix = [i for i in raw_matrix.split('\n') if i]            
+        else:
+            try:
+                print "Starting to read stats"
+                stat_fi = open(os.path.join(self.dset_path, 
+                        '%i.stat.1D' % self.clust[self.surface_nodeid]), 
+                    'r')
+                raw_matrix = stat_fi.readlines()
+                stat_fi.close()
+                print 'Loaded matrix ok'
+            except IOError:
+                #TODO: Handle a file error
+                raise
+            
+        print raw_matrix
+        matrix = [float(i) for i in raw_matrix]
+        # Map nodes to correlations
+        matrix = zip(self.draw_here, matrix)    
+          
+        return matrix
+    
+    def fetch_initial_data(self):
+        '''
+        In server mode, download the surface, volume, and cluster files we 
+        need to start the session.
+        '''
+        #TODO: Handle all the exceptions in this method.
+        print self.temp_dir
+        if not self.mode == 'server':
+            raise ValueError(
+                "fetch_initial_data can only be used in server mode.")
+        
+        if self.owner:
+            self.net_thread.job_q.put(['shared_cluster', self.dset, 
+                                       self.owner])
+        else:
+            self.net_thread.job_q.put(['cluster', self.dset])
+        raw_clusters = self.net_thread.recv_response(None)
+            
+        self.parse_clusters(raw_clusters.split('\n'))
+        
+        if self.owner:
+            self.net_thread.job_q.put(['shared_surface', self.dset, 
+                                       self.owner, self.temp_dir])
+        else:
+            self.net_thread.job_q.put(['surface', self.dset, self.temp_dir])
+        self.dset_path = self.net_thread.recv_response(None)
+        
+        files = os.listdir(self.dset_path)
+        
+        '''
+        print files
+        print [os.path.splitext(file) for file in files]
+        print [file for file in files 
+                              if os.path.splitext(file)[1] == '.spec' or 
+                              os.path.splitext(file)[1] == '.SPEC']
+        print [file for file in files 
+                              if os.path.splitext(file)[1] == '.head' or 
+                              os.path.splitext(file)[1] == '.HEAD']
+        '''
+        try:
+            self.spec_file = [file for file in files 
+                              if os.path.splitext(file)[1] == '.spec' or 
+                              os.path.splitext(file)[1] == '.SPEC'][0]
+            self.surfvol_file = [file for file in files 
+                              if os.path.splitext(file)[1] == '.head' or 
+                              os.path.splitext(file)[1] == '.HEAD'][0]
+            self.spec_file = os.path.join(self.dset_path, self.spec_file)
+            self.surfvol_file = os.path.join(self.dset_path, self.surfvol_file)
+            
+            print "Spec file: %s"%(self.spec_file)
+            print "Surfvol file: %s"%(self.surfvol_file)
+        except IndexError:
+            tkMessageBox.showerror("Error", 
+                "The dataset did not contain a valid spec or surfvol file. "+
+                "Check the dataset and try uploading it again.")
+            raise
+        
+        
+    def parse_clusters(self, clust_dat):
+        '''
+        Parse a cluster file and store it in self.clust.
+        Takes a file object or a cluster file split at '\n'
+        '''
+        # Preallocate the cluster array
+        self.clust = [0 for i in clust_dat if i != ''] 
+        # Draw the graphic for each cluster at the first node in the cluster
+        #TODO: Make sure the center vertex is always first 
+        self.draw_here = []
+        cluster = 0
+        first = True
+        for i in clust_dat:
+        # Empty lines signify a new cluster
+            if i == '':
+                cluster += 1
+                first = True
+            else:
+                try:
+                    self.clust[int(i)] = cluster
+                    if first:
+                        self.draw_here.append(int(i))
+                        first = False
+                except IndexError:
+                    print "Index error:"
+                    print "int(i) == %i" % (int(i))
+                    print "len(clust) == %i" % (len(self.clust))
+        
+        #            assert cluster[-1] ==
+        print 'Loaded cluster file ok'
 
     def launch_suma_connect(self):
         '''
         Launch SUMA, initiate a NIML connection, and load the surface that 
         SUMA is loading 
         '''
+        if self.mode == 'server':
+            self.temp_dir = mkdtemp()
+            #TODO: Handle errors from fetch_initial_data
+            self.fetch_initial_data()
+            
+        self.svr_socket.listen(5)
+        
         # SUMA has a bug with spaces in the path to surfvol, so set the cwd
         # to the surfvol directory.
         cwd, surfvol = os.path.split(self.surfvol_file)
@@ -50,25 +211,25 @@ class ProcessingThread(Thread):
                 "-sv", surfvol, 
                 "-niml", 
                 "-ah", "127.0.0.1", 
-                "-np", "53211"], cwd=cwd)
+                "-np", str(self.np)], cwd=cwd)
         
-    #                    stderr=subprocess.PIPE,
-    #                    stdout=subprocess.PIPE)
-    # TODO: Add a message telling the user to press 't' in SUMA
-        self.svr_socket.listen(5)
-    # Tell SUMA to initiate the NIML connection
+        #                    stderr=subprocess.PIPE,
+        #                    stdout=subprocess.PIPE)
+        # TODO: Add a message telling the user to press 't' in SUMA
+        # Tell SUMA to initiate the NIML connection
         """
-    print ' '.join(["/home/morganl/workspace/AFNI/Debug/afni_src/DriveSuma",
-                "-com", "viewer_cont", "-key", "'t'", "-np", "53211"])
+        print ' '.join(["/home/morganl/workspace/AFNI/Debug/afni_src/DriveSuma",
+                    "-com", "viewer_cont", "-key", "'t'", "-np", "53211"])
+        """
+        time.sleep(3)
+        DriveSuma = subprocess.Popen(["/home/morganl/workspace/AFNI/Debug/afni_src/DriveSuma",
+                    "-com", "viewer_cont", "-key", "t", "-np", str(self.np)])
+        """
+        DriveSuma = subprocess.Popen(["/home/morganl/workspace/AFNI/Debug/afni_src/DriveSuma",
+                    "-com", "viewer_cont", "-key", "'t'"])
+                    """
+        print 'Sent key to SUMA'
     
-    sleep(1)
-    DriveSuma = subprocess.Popen(["/home/morganl/workspace/AFNI/Debug/afni_src/DriveSuma",
-                "-com", "viewer_cont", "-key", "'t'", "-np", "53211"])
-    
-    DriveSuma = subprocess.Popen(["/home/morganl/workspace/AFNI/Debug/afni_src/DriveSuma",
-                "-com", "viewer_cont", "-key", "'t'"])
-    print 'Sent key to SUMA'
-    """
         print "Waiting for connection from SUMA"
         self.svr_socket.settimeout(60)
         self.socket, address = self.svr_socket.accept()
@@ -83,36 +244,16 @@ class ProcessingThread(Thread):
         self.num_nodes = int(num_nodes)
     # Decode the cluster file
     # Load the cluster information
-        try:
-            print "Starting to read clusters"
-            clust_fi = open(os.path.join(self.dset_path, 'clusters.1D'))
-            clust_dat = clust_fi.read().split('\n')
-            clust_fi.close() # Preallocate the cluster array
-            self.clust = range(self.num_nodes) # Draw the graphic for each cluster at the first node in the cluster
-            self.draw_here = []
-            cluster = 0
-            first = True
-            for i in clust_dat:
-            # Empty lines signify a new cluster
-                if i == '':
-                    cluster += 1
-                    first = True
-                else:
-                    try:
-                        self.clust[int(i)] = cluster
-                        if first:
-                            self.draw_here.append(int(i))
-                            first = False
-                    except IndexError:
-                        print "Index error:"
-                        print "int(i) == %i" % (int(i))
-                        print "len(clust) == %i" % (len(self.clust))
-            
-    #            assert cluster[-1] ==
-            print 'Loaded cluster file ok'
-        except os.error:
-            print "ERROR: Could not open cluster file"
-            sys.exit(1)
+        if self.mode == 'local':
+            try:
+                print "Starting to read clusters"
+                clust_fi = open(os.path.join(self.dset_path, 'clusters.1D'))
+                clust_dat = clust_fi.read().split('\n')
+                clust_fi.close() 
+                self.parse_clusters(clust_dat)
+            except os.error:
+                print "ERROR: Could not open cluster file"
+                sys.exit(1)
     # Send the reply we need to get things started
     #TODO: Error in reply. Why?
         self.socket.send('<SUMA_irgba\n  surface_idcode="%s"\n  ' % (self.surface_idcode) + 'local_domain_parent_ID="%s"\n  ' % (self.surface_idcode) + 'volume_idcode="%s"\n  ' % (self.volume_idcode) + 'function_idcode="%s"\n  threshold="0" />' % (self.volume_idcode))
@@ -124,7 +265,18 @@ class ProcessingThread(Thread):
         self.svr_socket = socket.socket(socket.AF_INET, 
                                     socket.SOCK_STREAM)
         self.svr_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self.svr_socket.bind(("127.0.0.1", 53211))
+        self.np = 53211
+        bound = False
+        while not bound:
+            try:
+                self.svr_socket.bind(("127.0.0.1", self.np))
+                bound = True
+            except socket.error as e:
+                # If the port is already in use
+                if e.errno == 98:
+                    self.np = self.np+1
+                else: 
+                    raise e
         self.launch_suma_connect()
         
         # Start the main loop
@@ -136,6 +288,7 @@ class ProcessingThread(Thread):
                 dat = self.recv_data()
                 if dat:
                     self.last_dat = dat
+                    print dat
                     self.handle_mouse_click(dat)
 
             except socket.error:
@@ -151,6 +304,16 @@ class ProcessingThread(Thread):
                     self.job_q.task_done()
             except Empty:
                 pass
+        if self.mode == 'server':
+            # Delete temporary folder containing dataset
+            try:
+                os.rmdir(self.dset_path)
+            except OSError:
+                tkMessageBox.showerror("Error", "Could not delete temporary "+
+                                       "folder %s. If it still exists, you can "+
+                                       "try to delete it manually.")
+            
+        self.suma.kill()
         self.svr_socket.close()
                 
     def handle_mouse_click(self, dat, force_update=False):
@@ -165,7 +328,10 @@ class ProcessingThread(Thread):
                                                self.surface_label))
                 print "Loaded new surface"
             self.surface_nodeid = int(self.surface_nodeid)
+            self.res_q.put_nowait(["node", self.surface_nodeid])
             selected_cluster = self.clust[self.surface_nodeid]
+            self.res_q.put_nowait(["cluster", selected_cluster])
+            
             # If a new cluster was selected, update the figure
             if (self.selected_cluster != selected_cluster) or force_update:
                 if not force_update:
@@ -175,19 +341,10 @@ class ProcessingThread(Thread):
                     print "surface label: %s" % (self.surface_label)
                 # Update the selected cluster
                 self.selected_cluster = self.clust[self.surface_nodeid] # Load the appropriate matrix
-                try:
-                    print "Starting to read stats"
-                    stat_fi = open(os.path.join(self.dset_path, 
-                            '%i.stat.1D' % self.clust[self.surface_nodeid]), 
-                        'r')
-                    matrix = [float(i) for i in stat_fi]
-                    # Map nodes to correlations
-                    matrix = zip(self.draw_here, matrix)
-                    stat_fi.close()
-                    print 'Loaded matrix ok'
-                except IOError:
-                    #TODO: Handle a file error
-                    raise
+                matrix = self.get_matrix(self.selected_cluster)
+                # If there was an error while getting the matrix, return
+                if not matrix:
+                    return
                 self.send_displayable_object(self.surface_nodeid, matrix)
                 print "Sent DO"
             else:
@@ -225,6 +382,10 @@ class ProcessingThread(Thread):
         
         if cmd[0] == 'suma':
             try:
+                # If suma is running, kill it
+                if self.ready():
+                    self.suma.kill()
+                    
                 self.res_q.put_nowait(
                     self.launch_suma_connect())
             except Exception as e:
@@ -247,6 +408,7 @@ class ProcessingThread(Thread):
                 except Exception as e:
                     print "Exception during redraw: ",
                     print e
+                    print_exc()
 #                    self.res_q.put_nowait(e)
             elif cmd[0] == 'die':
                 self.cont = False
@@ -321,7 +483,8 @@ class ProcessingThread(Thread):
             surf_fi = open(surf_fi_name, 'r')
             surf = surf_fi.read()
             
-            #TODO: SUpport binary surfaces
+            #TODO: Support binary surfaces
+            #TODO: Make this a separate library
             if not re.match("#!ascii", surf):
                 raise ValueError("Only ASCII surface files (.asc files) are currently supported")
             else:
@@ -355,16 +518,21 @@ class ProcessingThread(Thread):
             print "Error reading surface file: %s"%str(e)
             sys.exit(1)
             
+    def norm(self, val):
+        '''
+        Normalize val from being between self.threshold and 1
+        to being from 0 to 1
+        '''
+        return (val-self.threshold)/(1-self.threshold)
+            
     def color_data(self, filtered_matrix):
         '''
         Given a list of nodes and their correlations,
         make a list of nodes and RGBA values given the current coloring mode
         '''
         # Normalize a value self.threshold<=t<=1 to 0<=t<=1
-        norm = lambda x, t=self.threshold: (x+t-1.)/t
-        
         if self.color == 'heat':
-            colored = [(i[0], norm(i[1]), 0., 1.-norm(i[1]), 1.) for i in filtered_matrix]
+            colored = [(i[0], self.norm(i[1]), 0., 1.-self.norm(i[1]), 1.) for i in filtered_matrix]
         
         if self.color == 'brightness':
             colored = range(len(filtered_matrix))
@@ -394,9 +562,6 @@ class ProcessingThread(Thread):
 #        shape = 'spheres'
 #        color = 'heat'
         
-        # Function to normalize thresholded values
-        #norm = lambda x, t=self.threshold: (1./t)*x-((1./t)-1.)
-        norm = lambda x, t=self.threshold: (x+t-1.)/t
         # TODO: Make path generation use filtered_matrix
         filtered_matrix = [i for i in matrix if i[1] > self.threshold] 
         colored = self.color_data(filtered_matrix)
@@ -454,7 +619,7 @@ class ProcessingThread(Thread):
                 if color == 'brightness': 
                     for line_ind in xrange(len(path)):
                         line = path[line_ind]
-                        norm_corr = norm(matrix[indices[dest]][1])
+                        norm_corr = self.norm(matrix[indices[dest]][1])
                         path[line_ind] = [int(line[0]), int(line[1]), 
                              float(line[2])*norm_corr, 
                              float(line[3])*norm_corr, 
@@ -464,9 +629,9 @@ class ProcessingThread(Thread):
                     for line_ind in xrange(len(path)):
                         line = path[line_ind]
                         path[line_ind] = [int(line[0]), int(line[1]), 
-                             norm(matrix[indices[dest]][1]), 
+                             self.norm(matrix[indices[dest]][1]), 
                              0.0, 
-                             (1-norm(matrix[indices[dest]][1])), 
+                             (1-self.norm(matrix[indices[dest]][1])), 
                              float(line[5])]
                 elif color == 'alpha':
                     for line_ind in xrange(len(path)):
@@ -493,8 +658,8 @@ class ProcessingThread(Thread):
             if color == 'nodemap':
                 for i in xrange(0,self.num_nodes,4):
                     do_file.write("%i %.3f 0.0 %.3f 1.0\n"%(i, 
-                                                    norm(float(i)/float(self.num_nodes)), 
-                                                    1.-norm(float(i)/float(self.num_nodes))))
+                                                    self.norm(float(i)/float(self.num_nodes)), 
+                                                    1.-self.norm(float(i)/float(self.num_nodes))))
             else:
                 for i in colored:
                     do_file.write("%i %.3f %.3f %.3f %.3f\n"%(i))
@@ -514,6 +679,7 @@ class ProcessingThread(Thread):
         
         # Load the shapes into SUMA
         DriveSuma = subprocess.Popen(["/home/morganl/workspace/AFNI/Debug/afni_src/DriveSuma",
+                    "-np", str(self.np),
                     "-com","viewer_cont",
                     "-load_do", self.do_file+'.1D.do'],
                     stderr=subprocess.STDOUT,
