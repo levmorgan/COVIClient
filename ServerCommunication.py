@@ -1,4 +1,4 @@
-import ssl, json, array, os, hashlib, tarfile, inspect
+import ssl, json, array, os, hashlib, tarfile
 
 '''
 A module for communicating between COVI Client and COVI server.
@@ -80,7 +80,7 @@ def safe_send(sock, data, method):
 def simple_request(sock, req, method):
     '''
     Convert the request to JSON, send it, and run handle_response on the reply
-    '''    
+    '''
     try:
         sock.send(json.dumps(req))
         #reply = safe_recv(sock, method)
@@ -135,7 +135,24 @@ def new_dset(sock, dset_archive, dset_name):
     sock.send(arr)
     #return handle_response(safe_recv(sock, method), method)
     return handle_response(sock.recv(), method)
+
+def recv_binary(sock, method, res):
+    length = res["len"]
+    md5_hash = res["md5"]
+    reply = ''
+    while len(reply) < length:
+        # I know this is slow! This is just for debugging!
+        #res = safe_recv(sock, method)
+        res = sock.recv()
+        res = handle_response(res, method, non_json_data=True)
+        reply += res
     
+    recv_hash = hashlib.md5(reply).hexdigest()
+    if recv_hash != md5_hash:
+        raise RequestFailureException(method, 
+            "%s data from the server was invalid,"%(method) +
+            " try your request again.")
+    return reply
 
 def matrix_req(sock, dset, number):
     method = "Matrix request"
@@ -148,63 +165,68 @@ def matrix_req(sock, dset, number):
     if not res:
         return
     else:
-        length = res["len"]
-        md5_hash = res["md5"]
-        
-        sock.send(json.dumps({ "covi-request": { "type":"resp ok" } }))
-        reply = ''
-        
-        while len(reply) < length:
-            # I know this is slow! This is just for debugging!
-            #res = safe_recv(sock, method)
-            res = sock.recv()
-            res = handle_response(res, method, non_json_data=True)
-            reply += res
-        recv_hash = hashlib.md5(reply).hexdigest()
-        if recv_hash != md5_hash:
-            raise RequestFailureException(method, 
-                        "Connectivity data from the server was invalid,"+
-                        " try your request again.")
-        return reply
-    
-def surface(sock, dset):
-    method = "Surface request"
+        sock.send(json.dumps({"covi-request":{"type":"resp ok"}}))
+        return recv_binary(sock, method, res)
+
+def cluster(sock, dset):
+    method = "cluster"
     req = { "covi-request": { 
-                             "type":"surface",
+                             "type":"cluster",
                              "dset":dset } }
     res = simple_request(sock, req, method)
     
     if not res:
         return
     else:
-        length = res["len"]
-        md5_hash = res["md5"]
+        sock.send(json.dumps({"covi-request":{"type":"resp ok"}}))
+        return recv_binary(sock, method, res)
+    
+def shared_cluster(sock, dset, owner):
+    method = "Shared cluster"
+    req = { "covi-request": { 
+                             "type":"shared cluster",
+                             "dset":dset,
+                             "owner":owner } }
+    res = simple_request(sock, req, method)
+    
+    if not res:
+        return
+    else:
+        sock.send(json.dumps({"covi-request":{"type":"resp ok"}}))
+        return recv_binary(sock, method, res)
         
-        sock.send(json.dumps({ "covi-request": { "type":"resp ok" } }))
-        reply = ''
-        
-        while len(reply) < length:
-            # I know this is slow! This is just for debugging!
-            #res = safe_recv(sock, method)
-            res = sock.recv()
-            res = handle_response(res, method, non_json_data=True)
-            reply += res
-        recv_hash = hashlib.md5(reply).hexdigest()
-        if recv_hash != md5_hash:
-            raise RequestFailureException(method, 
-                        "Surface data from the server was corrupted,"+
-                        " try your request again.")
+    
+def surface(sock, dset, destination_dir):
+    '''
+    Request an archive with surface, surfvol, and spec files from 
+    the server and extract it into destination_dir
+    '''
+    method = "Surface"
+    req = { "covi-request": { 
+                             "type":"surface",
+                             "dset":dset } }
+    try:
+        res = simple_request(sock, req, method)
+    except:
+        raise
+    
+    if not res:
+        return
+    else:
+        sock.send(json.dumps({"covi-request":{"type":"resp ok"}}))
+        reply = recv_binary(sock, method, res)
     
     # Write the data to disk and extract it
     try:
-        file_dir = os.path.dirname(inspect.stack[-1][1])
-        arch_fi_name = os.path.join(file_dir, dset+'-surfaces.tar.gz')
+#        file_dir = os.path.dirname(inspect.stack[-1][1])
+#        arch_fi_name = os.path.join(file_dir, dset+'-surfaces.tar.gz')
+        arch_fi_name = os.path.join(destination_dir, dset+'-surfaces.tar.gz')
         arch_fi = open(arch_fi_name, 'wb')
         arch_fi.write(reply)
         arch_fi.close()
         
         arch_fi = open(arch_fi_name, 'rb')
-        surface_dir = os.path.join(file_dir, dset+'-surfaces')
+        surface_dir = os.path.join(destination_dir, dset+'-surfaces')
         os.mkdir(surface_dir)
         tar = tarfile.TarFile.gzopen(name=None, mode='r', fileobj=arch_fi)
         tar.extractall(surface_dir)
@@ -212,7 +234,51 @@ def surface(sock, dset):
         os.remove(arch_fi_name)
     except:
         raise
-                
+    
+    return surface_dir
+
+def shared_surface(sock, dset, owner, destination_dir):
+    '''
+    Request an archive with surface, surfvol, and spec files from 
+    the server and extract it into destination_dir
+    '''
+    method = "Shared surface"
+    req = { "covi-request": { 
+                             "type":"shared surface",
+                             "dset":dset,
+                             "owner":owner } }
+    try:
+        res = simple_request(sock, req, method)
+    except:
+        raise
+    
+    if not res:
+        return
+    else:
+        sock.send(json.dumps({"covi-request":{"type":"resp ok"}}))
+        reply = recv_binary(sock, method, res)
+    
+    # Write the data to disk and extract it
+    try:
+#        file_dir = os.path.dirname(inspect.stack[-1][1])
+#        arch_fi_name = os.path.join(file_dir, dset+'-surfaces.tar.gz')
+        arch_fi_name = os.path.join(destination_dir, dset+'-surfaces.tar.gz')
+        arch_fi = open(arch_fi_name, 'wb')
+        arch_fi.write(reply)
+        arch_fi.close()
+        
+        arch_fi = open(arch_fi_name, 'rb')
+        surface_dir = os.path.join(destination_dir, dset+'-surfaces')
+        os.mkdir(surface_dir)
+        tar = tarfile.TarFile.gzopen(name=None, mode='r', fileobj=arch_fi)
+        tar.extractall(surface_dir)
+        arch_fi.close()
+        os.remove(arch_fi_name)
+    except:
+        raise
+    
+    return surface_dir
+
 def rename(sock, old, new):
     method = "Rename"
     req = { "covi-request": { 
@@ -221,16 +287,31 @@ def rename(sock, old, new):
                              "new":new } }
     return simple_request(sock, req, method)
 
-def share(sock, dset, recipient, can_share):
+def share(sock, dset, recipient, response):
     method = "Share"
-    if (can_share != 0) and (can_share != 1):
-        raise ValueError("can_share must be 0 or 1, not %s"%(str(can_share))) 
+    if (response != 0) and (response != 1):
+        raise ValueError("response must be 0 or 1, not %s"%(str(response))) 
     req = { "covi-request": { 
                              "type":"share", 
                              "dset":dset, 
                              "recipient":recipient, 
-                             "can share":can_share } }
+                             "can share":response } }
     return simple_request(sock, req, method)
+
+def share_response(sock, dset, owner, response):
+    '''
+    Accept or reject a share request from another user
+    '''
+    method = "Share response"
+    if (response != 0) and (response != 1):
+        raise ValueError("response must be 0 or 1, not %s"%(str(response))) 
+    req = { "covi-request": { 
+                             "type":"share response", 
+                             "dset":dset, 
+                             "owner":owner, 
+                             "response":response } }
+    return simple_request(sock, req, method)
+    
 
 def unshare(sock, dset, recipient):
     method = "Unshare"
@@ -314,3 +395,5 @@ if __name__ == '__main__':
     sec_clisock.settimeout(10)
     sec_clisock.connect((socket.gethostname(), 14338))
     sock = sec_clisock
+
+

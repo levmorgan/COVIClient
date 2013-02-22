@@ -237,6 +237,19 @@ class TestServerCommunication(unittest.TestCase):
         
         # Put things back the way they were
         sc.auth(self.sock, 'lev', 'lev')
+    
+    def test_clusters(self):
+        clusters = sc.cluster(self.sock, "fakedset")
+        # Try to parse the first entry, not catching any exceptions
+        self.assertRegexpMatches(clusters, r'[0-9\n]+', "Invalid cluster data")
+        
+    def test_shared_clusters(self):
+        # Get a list of shared datasets
+        dsets = sc.lst(self.sock)['shared']
+        test_elt = dsets[0]
+        
+        clusters = sc.shared_cluster(self.sock, test_elt[2], test_elt[0])
+        self.assertRegexpMatches(clusters, r'[0-9\n]+', "Invalid cluster data")
         
 if __name__ == "__main__":
     #import sys;sys.argv = ['', 'Test.testName']
