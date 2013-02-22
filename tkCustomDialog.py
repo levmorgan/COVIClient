@@ -1,0 +1,126 @@
+import Tkinter as tk
+import ttk
+
+# TODO: Just make a subclass of tkSimpleDialog.Dialog
+
+def center_window(window):
+    '''
+    Center a tk window. Only call after the window is populated 
+    with widgets.
+    '''
+    # Hide the window so it doesn't draw in the wrong place
+    window.withdraw()
+    # Update it
+    window.update_idletasks()
+
+    # Center
+    x = (window.winfo_screenwidth() - window.winfo_reqwidth()) / 2
+    y = (window.winfo_screenheight() - window.winfo_reqheight()) / 2
+    window.geometry("+%d+%d" % (x, y))
+
+    # Show
+    window.deiconify()
+
+class Dialog(tk.Toplevel):
+    '''
+    Dialog class adapted from http://www.pythonware.com/library/tkinter/introduction/dialog-windows.htm
+    '''
+
+    def __init__(self, parent, title = None, **kwargs):
+
+        tk.Toplevel.__init__(self, parent)
+        self.transient(parent)
+
+        if title:
+            self.title(title)
+
+        self.parent = parent
+
+        self.result = None
+
+        body = tk.Frame(self)
+        self.initial_focus = self.body(body, **kwargs)
+        body.pack(padx=5, pady=5)
+
+        self.buttonbox()
+
+        self.grab_set()
+        
+        center_window(self)
+
+        if not self.initial_focus:
+            self.initial_focus = self
+
+        self.protocol("WM_DELETE_WINDOW", self.cancel)
+        
+        """
+        self.geometry("+%d+%d" % (parent.winfo_rootx()+50,
+                                  parent.winfo_rooty()+50))
+                                  """
+
+        self.initial_focus.focus_set()
+
+        self.wait_window(self)
+        
+    #
+    # construction hooks
+
+    def body(self, master, **kwargs):
+        # create dialog body.  return widget that should have
+        # initial focus.  this method should be overridden
+
+        pass
+
+    def buttonbox(self):
+        # add standard button box. override if you don't want the
+        # standard buttons
+        
+        box = tk.Frame(self)
+
+        w = ttk.Button(box, text="OK", width=10, command=self.ok, default=tk.ACTIVE)
+        w.pack(side=tk.LEFT, padx=5, pady=5)
+        w = ttk.Button(box, text="Cancel", width=10, command=self.cancel)
+        w.pack(side=tk.LEFT, padx=5, pady=5)
+
+        self.bind("<Return>", self.ok)
+        self.bind("<Escape>", self.cancel)
+
+        box.pack()
+
+    #
+    # standard button semantics
+
+    def ok(self, event=None):
+
+        if not self.validate():
+            self.initial_focus.focus_set() # put focus back
+            return
+
+        self.withdraw()
+        self.update_idletasks()
+
+        self.apply()
+
+        self.cancel()
+
+    def cleanup(self):
+        # Clean up before closing the window
+        pass
+
+    def cancel(self, event=None):
+        self.cleanup() 
+        
+        # put focus back to the parent window
+        self.parent.focus_set()
+        self.destroy()
+
+    #
+    # command hooks
+
+    def validate(self):
+
+        return 1 # override
+
+    def apply(self):
+
+        pass # override
