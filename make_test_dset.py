@@ -1,16 +1,26 @@
+from sys import argv
 from math import ceil
 from random import gauss
 '''
 This is a quick and dirty script to create a valid COVI test dataset.
 It creates the dataset in the directory the script is being run from.
 '''
+
+args = argv[1:]
+try:
+    num_nodes = int(args[0])
+    if len(args) > 1:
+        nodes_per_clust = int(args[1])
+    else:
+        nodes_per_clust = 64 
+except:
+    print "Usage: python create_test_dset.py <number of nodes> [nodes per cluster]"
+
+
 # Whether to make stat.1D files, or just the cluster file
 make_stat_files = True
 
-nodes_per_clust = 64
-num_nodes = 135374
-
-num_clusters = ceil(float(num_nodes)/nodes_per_clust)
+num_clusters = int(ceil(float(num_nodes)/nodes_per_clust))
 clust_fi = open('clusters.1D', 'w')
 clust_fi.write('%i\n'%0)
 for i in xrange(1,num_nodes):

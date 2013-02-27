@@ -61,6 +61,10 @@ class NetworkThread(threading.Thread):
             elif job[0] == 'die':
                 self.cont = False
                 self.sock.close()
+            elif not self.authenticated():
+                raise sc.RequestFailureException("dispatching", 
+                     "you must be authenticated to run a(n) "+
+                     "%s request"%(job[0]))
             else:
                 try:
                     res = self.dispatch[job[0]](self.sock, *job[1:])
@@ -85,9 +89,8 @@ class NetworkThread(threading.Thread):
                 wait = False
             except Empty:
                 wait = tkMessageBox.askyesno("Network Issue", 
-                                      "The response from the server is"+
-                                      " taking longer than expected. "+
-                                      "Continue waiting?")
+                    "The response from the server is  taking longer than "+
+                    "expected. Continue waiting?")
         if wait == False:
             return False
 

@@ -9,7 +9,10 @@ from traceback import print_exc
 from threading import Thread
 from Queue import Queue, Empty
 from tempfile import mkdtemp
+from struct import unpack
+from struct import error as struct_error
 import tkMessageBox
+import FsFormats as FsF
 class ProcessingThread(Thread):
     
     def ready(self):
@@ -20,7 +23,8 @@ class ProcessingThread(Thread):
     
     def __init__(self, 
                  # Args for client mode
-                 spec_file=None, surfvol_file=None, dset_path=None,
+                 spec_file=None, surfvol_file=None, dset_path=None, 
+                 annot_file=None,
                  # Args for server mode 
                  dset=None, net_thread=None, owner=None):
         '''
@@ -30,6 +34,7 @@ class ProcessingThread(Thread):
         Client mode:
         spec_file: The path to a SUMA spec file
         surfvol_file: The path to an AFNI HEAD file
+        annot_file: The path to a FreeSurfer annotation file (optional)
         dset_path: The path to a directory containing a clusters.1D 
                    and .stat.1D files
         
@@ -44,6 +49,7 @@ class ProcessingThread(Thread):
             self.spec_file = spec_file
             self.surfvol_file = surfvol_file
             self.dset_path = dset_path
+            self.annot_file = annot_file
             self.mode = 'local'
         
         elif dset and net_thread:
@@ -58,8 +64,8 @@ class ProcessingThread(Thread):
         
         else:
             raise ValueError("ProcessingThreadClass needs the arguments:\n"+
-                             "spec_file, surfvol_file, and dset_path to "+
-                             "operate in client mode, or:\n"+
+                        "spec_file, surfvol_file, annot_file (optional) and "+
+                             "dset_path to  operate in client mode, or:\n"+
                              "dset and net_thread to operate in server mode.")
         
         self.do_file = 'shapes'
@@ -95,7 +101,6 @@ class ProcessingThread(Thread):
                 #TODO: Handle a file error
                 raise
             
-        print raw_matrix
         matrix = [float(i) for i in raw_matrix]
         # Map nodes to correlations
         matrix = zip(self.draw_here, matrix)    
@@ -217,19 +222,12 @@ class ProcessingThread(Thread):
         #                    stdout=subprocess.PIPE)
         # TODO: Add a message telling the user to press 't' in SUMA
         # Tell SUMA to initiate the NIML connection
-        """
-        print ' '.join(["/home/morganl/workspace/AFNI/Debug/afni_src/DriveSuma",
-                    "-com", "viewer_cont", "-key", "'t'", "-np", "53211"])
-        """
         time.sleep(3)
         DriveSuma = subprocess.Popen(["/home/morganl/workspace/AFNI/Debug/afni_src/DriveSuma",
                     "-com", "viewer_cont", "-key", "t", "-np", str(self.np)])
-        """
-        DriveSuma = subprocess.Popen(["/home/morganl/workspace/AFNI/Debug/afni_src/DriveSuma",
-                    "-com", "viewer_cont", "-key", "'t'"])
-                    """
         print 'Sent key to SUMA'
     
+        #FIXME: Add error handling here
         print "Waiting for connection from SUMA"
         self.svr_socket.settimeout(60)
         self.socket, address = self.svr_socket.accept()
@@ -239,9 +237,27 @@ class ProcessingThread(Thread):
         print "Starting to receive data"
         data = self.recv_data()
         print "Data chunk received"
-    # Parse info out of the data we received
-        num_nodes, self.volume_idcode, self.surface_idcode, self.surface_label = re.findall("""<SUMA_ixyz\n  ni_form="binary.lsbfirst"\n  ni_type="int,3\*float"\n  ni_dimen="([0-9]+?)"\n  volume_idcode="(.*?)"\n  surface_idcode="(.*?)".*\n  surface_label="(.*?)".*""", data, flags=re.DOTALL)[0]
-        self.num_nodes = int(num_nodes)
+    # Parse info out of the data we received       
+        header = re.findall(
+                '<SUMA_ixyz\n  ni_form="binary.lsbfirst"\n  '+
+                'ni_type="int,3\*float"\n  ni_dimen="([0-9]+?)"\n  '+
+                'volume_idcode="(.*?)"\n  surface_idcode="(.*?)".*\n  '+
+                'surface_label="(.*?)".*?'+
+                'local_domain_parent_ID=".*?".*?'+
+                'local_domain_parent="(.*?)".*?',
+                data[:500], flags=re.DOTALL)
+
+        (num_nodes, volume_idcode, surface_idcode,
+         self.surface_label, self.local_domain_parent) = header[0]
+        if re.search("SAME", self.local_domain_parent):
+            self.local_domain_parent = self.surface_label
+        try:
+            self.load_niml_surfaces(data)
+        except (AttributeError, struct_error, ValueError):
+            # We can't continue without the surface data, so die
+            self.cont = False
+            return
+        self.set_surface(self.local_domain_parent)
     # Decode the cluster file
     # Load the cluster information
         if self.mode == 'local':
@@ -251,15 +267,29 @@ class ProcessingThread(Thread):
                 clust_dat = clust_fi.read().split('\n')
                 clust_fi.close() 
                 self.parse_clusters(clust_dat)
-            except os.error:
-                print "ERROR: Could not open cluster file"
-                sys.exit(1)
+            except os.error as e:
+                tkMessageBox.showerror("Could not open cluster file", 
+                       "%s Try reloading the dataset."%str(e))
+                # We can't continue without the cluster data, so die
+                self.cont = False
+                return
     # Send the reply we need to get things started
-    #TODO: Error in reply. Why?
         self.socket.send('<SUMA_irgba\n  surface_idcode="%s"\n  ' % (self.surface_idcode) + 'local_domain_parent_ID="%s"\n  ' % (self.surface_idcode) + 'volume_idcode="%s"\n  ' % (self.volume_idcode) + 'function_idcode="%s"\n  threshold="0" />' % (self.volume_idcode))
-    #FIXME: Read in the surface file from disk, no time for NIDO right now
-        self.load_surface(os.path.join(os.path.split(self.spec_file)[0], 
+        """
+        try:
+            self.load_surface(os.path.join(os.path.split(self.spec_file)[0], 
                                        self.surface_label))
+        except IOError as e:
+            return False
+        """
+        # Load the annotation file, if there is one
+        if self.annot_file:
+            try:
+                self.load_annot(self.annot_file)
+            except (IOError, ValueError, struct_error):
+                self.annot = None
+        else:
+            self.annot = None
 
     def run(self):
         self.svr_socket = socket.socket(socket.AF_INET, 
@@ -315,22 +345,89 @@ class ProcessingThread(Thread):
             
         self.suma.kill()
         self.svr_socket.close()
+        
+    def load_niml_surfaces(self, data):
+        error_title = "Could not read data from SUMA"
+        error_msg = "The data from SUMA could not be read:\n%s\nTry restarting COVI."
+        surface_offsets = [ i.start() for i in 
+                            re.finditer("<SUMA_ixyz", data, flags=re.DOTALL)]
+        surfaces = {}
+        for start_offset in surface_offsets:
+            dat = data[start_offset:]
+            header = re.findall(
+                '<SUMA_ixyz\n  ni_form="binary.lsbfirst"\n  ni_type="int,3\*float"\n  '+
+                'ni_dimen="([0-9]+?)"\n  volume_idcode="(.*?)"\n  '+
+                'surface_idcode="(.*?)".*\n  surface_label="(.*?)"',
+                 dat[:500], flags=re.DOTALL)
+    
+            try:
+                num_nodes, volume_idcode, surface_idcode, surface_label = header[0]
+                num_nodes = int(num_nodes)
+                offset = re.search(">", dat).end()
+            except Exception as e:
+                tkMessageBox.showerror(error_title, error_msg%(str(e)))
+                raise
+    
+            nodes = range(num_nodes)
+    
+    
+            mins = [10**5, 10**5, 10**5]
+            maxes = [-10**5, -10**5, -10**5]
+    
+    
+            for i in xrange(num_nodes):
+                try:
+                    nodes[i] = unpack('<i3f',dat[offset:offset+16])[1:]
+                except struct_error as e:
+                    tkMessageBox.showerror(error_title, error_msg%(str(e)))
+                    raise
+                    
+                for j in xrange(3):
+                    mins[j] = min(mins[j], nodes[i][j])
+                    maxes[j] = max(maxes[j], nodes[i][j])
+                    
+                offset += 32
+    
+            surfaces[surface_label] = [
+                nodes, num_nodes, volume_idcode, surface_idcode, mins, maxes]
+            
+    
+        self.surfaces = surfaces
+
+    def set_surface(self, surface_label):
+        self.nodes, self.num_nodes, self.volume_idcode, self.surface_idcode, mins, maxes = self.surfaces[surface_label]
+        self.x_range = [mins[0], maxes[0]]
+        self.y_range = [mins[1], maxes[1]]
+        self.z_range = [mins[2], maxes[2]] 
                 
     def handle_mouse_click(self, dat, force_update=False):
-        if force_update == True:
-            print "Redrawing"
         try:
-            self.surface_nodeid, self.surface_idcode, surface_label = re.findall("""<SUMA_crosshair_xyz\n  ni_type="float"\n  ni_dimen="3"\n  surface_nodeid="([0-9\.]+?)"\n  surface_idcode="(.*?)"\n  surface_label="(.*?)" >""", dat, flags=re.DOTALL)[0]
+            self.surface_nodeid, self.surface_idcode, surface_label = re.findall(
+                     '<SUMA_crosshair_xyz\n  ni_type="float"\n  ni_dimen="3"\n  '+
+                     'surface_nodeid="([0-9\.]+?)"\n  surface_idcode="(.*?)"\n  '+
+                     'surface_label="(.*?)" >'
+                     , dat, flags=re.DOTALL)[0]
             # If surface label is different, load the new surface
             if surface_label != self.surface_label:
                 self.surface_label = surface_label
-                self.load_surface(os.path.join(os.path.split(self.spec_file)[0], 
-                                               self.surface_label))
+                try:
+                    self.set_surface(surface_label)
+                except KeyError:
+                    try:
+                        self.load_surface(os.path.join(os.path.split(self.spec_file)[0], 
+                                                       self.surface_label))
+                    except (IOError, ValueError, struct_error):
+                        return
+                                               
+                
                 print "Loaded new surface"
             self.surface_nodeid = int(self.surface_nodeid)
             self.res_q.put_nowait(["node", self.surface_nodeid])
             selected_cluster = self.clust[self.surface_nodeid]
             self.res_q.put_nowait(["cluster", selected_cluster])
+            if self.annot:
+                node_area = self.annot[self.surface_nodeid][0]
+                self.res_q.put_nowait(["area", node_area])
             
             # If a new cluster was selected, update the figure
             if (self.selected_cluster != selected_cluster) or force_update:
@@ -480,6 +577,7 @@ class ProcessingThread(Thread):
     
     def load_surface(self, surf_fi_name):
         try:
+            """
             surf_fi = open(surf_fi_name, 'r')
             surf = surf_fi.read()
             
@@ -509,14 +607,38 @@ class ProcessingThread(Thread):
                 self.x_range = max(x)-min(x)
                 self.y_range = max(y)-min(y)
                 self.z_range = max(z)-min(z) 
+                """
+            res = FsF.read_surface(surf_fi_name)
+            self.x_range = res["x_range"]
+            self.y_range = res["y_range"]
+            self.z_range = res["z_range"]
+            self.nodes = res["nodes"]
+            self.triangles = res["triangles"]
+            #self.normals = res['normals']
             
         except IOError as e:
             #TODO: Rethink error handling
             print "Could not open surface file: %s"%str(e)
-            sys.exit(1)
-        except ValueError as e:
+            tkMessageBox.showerror("Could not open surface file", 
+                                   "%s Try reloading the dataset."%(str(e)))
+            raise
+            
+        except (ValueError, struct_error) as e:
             print "Error reading surface file: %s"%str(e)
-            sys.exit(1)
+            tkMessageBox.showerror("Error reading surface file", 
+                                   "%s Try reloading the dataset."%(str(e)))
+            raise
+    
+    def load_annot(self, annot_fi_name):
+        try:
+            data, color_table = FsF.read_annot(annot_fi_name)
+            self.annot = [color_table[i] for i in data]
+        except (IOError, ValueError, struct_error) as e:
+            tkMessageBox.showerror("Could not read annot file", 
+                       "%s If you want annotation data, "+
+                       "try reloading the dataset."%str(e))
+            raise
+        
             
     def norm(self, val):
         '''
@@ -539,6 +661,7 @@ class ProcessingThread(Thread):
             for i in xrange(len(filtered_matrix)):
                 node = filtered_matrix[i][0]
                 corr = filtered_matrix[i][1]
+                print self.nodes[node]
                 x, y, z, w = self.nodes[node]
                 colored[i] = (node, (x/self.x_range)*corr, 
                               (y/self.y_range)*corr, 
@@ -579,18 +702,20 @@ class ProcessingThread(Thread):
             nodelist.close()
             
             # Generate the paths
+            surf = os.path.join(os.path.dirname(self.spec_file), self.surface_label)
             surfdist = subprocess.Popen(["/home/morganl/workspace/AFNI/Debug/afni_src/SurfDist",
-                    "-i", self.surface_label,
+                    "-i", surf,
                     "-input", "nodelist.1D",
                     "-from_node", str(src_node),
-                    "-node_path_do", str(self.do_file)],
-                    stderr=subprocess.STDOUT,
-                    stdout=subprocess.PIPE)
+                    "-node_path_do", str(self.do_file)],)
+#                    stderr=subprocess.STDOUT,
+#                    stdout=subprocess.PIPE)
             ret = surfdist.wait()
         
             if ret != 0:
                 # Handle failure
-                pass
+                print "Path generation failed!"
+                print ret
         
             ret = surfdist.wait()
             
@@ -610,10 +735,12 @@ class ProcessingThread(Thread):
             paths = [[line.split(' ') for line in path] for path in paths]
             # Remove the empty line at the end of the file
             del paths[-1]
+            """
             print "Indices:"
             print len(indices)
             print "Paths:"
             print len(paths)
+            """
             for dest in xrange(len(indices)):
                 path = paths[dest]
                 if color == 'brightness': 
@@ -673,7 +800,7 @@ class ProcessingThread(Thread):
                 i = colored[j]
                 corr = filtered_matrix[j][1]
                 do_file.write("%i %.3f %.3f %.3f %.3f %.3f\n"%(i[0], i[1], i[2], 
-                                                               i[3], i[4], 2.*corr))
+                                                               i[3], i[4], 3.*corr))
 
             do_file.close()
         

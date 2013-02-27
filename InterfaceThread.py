@@ -6,7 +6,11 @@ from tkCustomDialog import Dialog
 from NetworkThread import NetworkThread
 from Queue import Empty
 from collections import defaultdict
-from COVIClient.ProcessingThreadClass import ProcessingThread
+import threading
+try:
+    from COVIClient.ProcessingThreadClass import ProcessingThread
+except:
+    from ProcessingThreadClass import ProcessingThread
 
 def is_error(obj):
     return isinstance(obj, Exception)
@@ -92,11 +96,13 @@ def handle_net_response(res, msg):
 
 class LocalSpecAndVolWindow(Dialog): 
     def validate(self):
-        if not self.spec_file and self.vol_file:
+        if not (self.spec_file and self.vol_file):
             tkMessageBox.showwarning("Spec and volume file selection", 
                                      "You must specify both a spec and a volume "+
                                      "file")
             return False
+        if not self.annot_var.get():
+            self.annot_file = None
         return True
     
     def browse_command(self, source):
@@ -115,7 +121,13 @@ class LocalSpecAndVolWindow(Dialog):
             # Remove the file extension
 #            self.vol_file = os.path.splitext(self.vol_file)[0]
             self.vol_var.set(self.vol_file)
-            pass
+        elif source == 2:
+            # Get the annot file location
+            self.annot_file = tkFileDialog.askopenfilename(multiple=False,
+                    initialdir=self.dset_path, 
+                    filetypes=[("FreeSurfer annot file", "*.annot")])
+            self.annot_var.set(self.annot_file)
+        
     def body(self, root, dset_path):
         self.spec_file = ''
         self.vol_file = ''
@@ -147,8 +159,19 @@ class LocalSpecAndVolWindow(Dialog):
                                              command=lambda: self.browse_command(1))
         self.vol_browse_button.grid(row=2, column=2)
         
-        add_padding(root)
+        annot_label = ttk.Label(root, text="Annot file")
+        annot_label.grid(row=3, column=0)
         
+        self.annot_var = tk.StringVar()
+        self.annot_field = ttk.Entry(root, width=60,
+                                textvariable=self.annot_var)
+        self.annot_field.grid(row=3, column=1)
+        
+        self.annot_browse_button = ttk.Button(root, text="Browse",
+                                             command=lambda: self.browse_command(2))
+        self.annot_browse_button.grid(row=3, column=2)
+        
+        add_padding(root)
         
 
 
@@ -163,6 +186,9 @@ class MainWindow:
         else:
             init_dialog = tk.Toplevel()
             init_dialog.title("COVI: Choose data source")
+            if self.net_thread:
+                self.net_thread.job_q.put(["die"])
+            self.net_thread = NetworkThread()
             init = InitWindow(init_dialog, self.net_thread)
             center_window(init_dialog)
             root.wait_window(init_dialog)
@@ -202,9 +228,11 @@ class MainWindow:
             if sv_window.spec_file and sv_window.vol_file:
                 self.spec_file = sv_window.spec_file
                 self.vol_file = sv_window.vol_file
+                self.annot_file = sv_window.annot_file
                 self.proc_thread = ProcessingThread(spec_file=self.spec_file,
                                                     surfvol_file=self.vol_file,
-                                                    dset_path = self.dset)
+                                                    dset_path = self.dset,
+                                                    annot_file = self.annot_file)
                 self.proc_thread.start()
                 
                 # Re-enable main window widgets
@@ -216,7 +244,7 @@ class MainWindow:
     
     def __init__(self, real_root):
         self.proc_thread = False
-        self.net_thread = NetworkThread()
+        self.net_thread = False
         self.real_root = real_root
         self.real_root.resizable(0,0)
         self.real_root.title("COVI")
@@ -243,17 +271,25 @@ class MainWindow:
         '''
         Check for events from SUMA.
         '''
-        if self.proc_thread and self.proc_thread.ready():
-            try:
-                res = self.proc_thread.res_q.get_nowait()
-                self.proc_thread.res_q.task_done()
-                if res:
-                    if res[0] == 'node':
-                        self.node_number_label['text'] = '%i'%res[1]
-                    if res[0] == 'cluster':
-                        self.cluster_number_label['text'] = '%i'%res[1]
-            except Empty:
-                pass
+        if self.proc_thread:
+            if self.proc_thread not in threading.enumerate():
+                tkMessageBox.showwarning("Connection to SUMA lost", 
+                      "The connection to SUMA has been lost. "+
+                      "Reload  your dataset to continue using COVI.")
+                self.proc_thread = False
+            if self.proc_thread and self.proc_thread.ready():
+                try:
+                    res = self.proc_thread.res_q.get_nowait()
+                    self.proc_thread.res_q.task_done()
+                    if res:
+                        if res[0] == 'node':
+                            self.node_number_label['text'] = '%i'%res[1]
+                        if res[0] == 'cluster':
+                            self.cluster_number_label['text'] = '%i'%res[1]
+                        if res[0] == 'area':
+                            self.curr_area_label['text'] = res[1]
+                except Empty:
+                    pass
         
         self.root.after(100, self.poll)
         
@@ -397,15 +433,16 @@ class MainWindow:
                                orient=tk.VERTICAL,
                                command=self.scale_command)
         self.threshold.set(50)
-        self.scale.grid(column=0, row=0, rowspan=6, sticky=(tk.N+tk.S),
+        self.scale.grid(column=0, row=0, rowspan=8, sticky=(tk.N+tk.S),
                         padx='3m', pady='1m')
         self.threshold_label = ttk.Label(self.root, text="0", justify=tk.LEFT)
-        self.threshold_label.grid(column=0, row=6)
+        self.threshold_label.grid(column=0, row=8)
         self.scale_command()
+        
         
         self.node_label = ttk.Label(self.root, text="Node")
         self.node_label.grid(column=1, row=0, sticky=tk.W+tk.E, padx='1m')
-         
+        
         self.node_number_label = ttk.Label(self.root, text='%i'%0, width='6',
                                       relief=tk.SUNKEN, justify=tk.RIGHT)
         self.node_number_label.grid(column=1, row=1, sticky=tk.W+tk.E, padx='1m')
@@ -417,6 +454,12 @@ class MainWindow:
         self.cluster_number_label = ttk.Label(self.root, text='%i'%0, width='6',
                                       relief=tk.SUNKEN, justify=tk.RIGHT)
         self.cluster_number_label.grid(column=1, row=3, sticky=tk.W+tk.E, padx='1m')
+        
+        self.area_label = ttk.Label(self.root, text="Area") 
+        self.area_label.grid(column=1, row=4, sticky=tk.W+tk.E, padx='1m')
+        self.curr_area_label = ttk.Label(self.root, text='',
+                                      relief=tk.SUNKEN, justify=tk.RIGHT)
+        self.curr_area_label.grid(column=1, row=5, sticky=tk.W+tk.E, padx='1m')
 
         """
         self.open_button = ttk.Button(self.root, text= "Open\nDataset",
@@ -425,16 +468,16 @@ class MainWindow:
         """
         self.switch_button = ttk.Button(self.root, text= "Switch\nDataset",
                                         command=self.switch_command)
-        self.switch_button.grid(column=1, row=4, sticky=tk.W+tk.E, padx='1m')
+        self.switch_button.grid(column=1, row=6, sticky=tk.W+tk.E, padx='1m')
         self.mode_button = ttk.Menubutton(self.root, text= "Graph\nMode")
         self.mode_button['menu'] = self.make_mode_menu(self.mode_button)
-        self.mode_button.grid(column=1, row=5, sticky=tk.W+tk.E, padx='1m')
+        self.mode_button.grid(column=1, row=7, sticky=tk.W+tk.E, padx='1m')
         self.color_button = ttk.Menubutton(self.root, text= "Color\nMode")
         self.color_button['menu'] = self.make_color_menu(self.color_button)
-        self.color_button.grid(column=1, row=6, sticky=tk.W+tk.E, padx='1m')
+        self.color_button.grid(column=1, row=8, sticky=tk.W+tk.E, padx='1m')
         self.redraw_button = ttk.Button(self.root, text= "Redraw",
                                         command=self.redraw_command)
-        self.redraw_button.grid(column=0, row=7, sticky=(tk.W+tk.E), 
+        self.redraw_button.grid(column=0, row=9, sticky=(tk.W+tk.E), 
                                 columnspan=2, padx='1m')
         add_padding(self.root)
         

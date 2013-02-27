@@ -2,7 +2,7 @@ from struct import error as struct_error, unpack
 import re
 import sys
 
-def read_annot(aparc_file_name):
+def read_annot(annot_file_name):
     '''
     Based on read_annotation.m
     Takes the name of an aparc file
@@ -14,7 +14,7 @@ def read_annot(aparc_file_name):
     '''
 
     try:
-        aparc = open(aparc_file_name, 'rb')
+        aparc = open(annot_file_name, 'rb')
     except:
         raise
         return None
@@ -22,6 +22,8 @@ def read_annot(aparc_file_name):
     num_records = unpack('>i', aparc.read(4))[0]
     data = unpack('>%ii'%(num_records*2), aparc.read(num_records*8))[1::2]
     try:
+        # This record will exist if there is a color table.
+        # I guess the value doesn't matter.
         has_colortable = unpack('>i', aparc.read(4))[0]
     except struct_error:
         #If there is no color table
@@ -67,14 +69,22 @@ def read_annot(aparc_file_name):
 
     return [data, color_table]
 
-if __name__ == '__main__':
-    read_annot('rh.aparc.annot')
+def read_annot_pythonic(annot_file_name):
+    '''
+    Loads an annot file and returns a map from node numbers to color table rows
+    '''
+    data, color_table = read_annot(annot_file_name)
+    return [color_table[i] for i in data]
 
-def norm(t1, t2):
+def norm(t1):
     '''
     Take a triangle in 3D space and produce a 3D surface normal
     '''
-    v0, v1, v2 = t1
+    try:
+        v0, v1, v2 = t1
+    except:
+        print t1
+        raise
     v0v1 = [v1[i]-v0[i] for i in xrange(3)]
     v0v2 = [v2[i]-v0[i] for i in xrange(3)]
     norm = range(3)
@@ -84,48 +94,47 @@ def norm(t1, t2):
 
     return norm
 
-def load_surface(surf_fi_name):
+
+def read_binary_surface(surf_fi_name):
+    print "Pretend we're reading a binary surface: %s"%(surf_fi_name)
+    pass
+
+
+def read_surface(surf_fi_name):
+    if not re.match(r".*?\.asc$", surf_fi_name):
+        return read_binary_surface(surf_fi_name)
+    surf_fi = open(surf_fi_name, 'r')
+    surf = surf_fi.read()
+    
+    # Load an ASCII surface
+    surf = surf.split('\n')
     try:
-        surf_fi = open(surf_fi_name, 'r')
-        surf = surf_fi.read()
-        
-        #TODO: Support binary surfaces
-        #TODO: Make this a separate library
-        if not re.match("#!ascii", surf):
-            raise ValueError("Only ASCII surface files (.asc files) are currently supported")
-        else:
-            # Load an ASCII surface
-            surf = surf.split('\n')
-            num_nodes = int(surf[1].split(' ')[0])
-            # Separate out the x y z locations of nodes and 
-            # parse them to floats
-            nodes = [i.split() for i in surf[2:num_nodes+2]]
-            nodes = [[float(i) for i in node] for node in nodes]
-            
-            triangles = [i.split() for i in surf[num_nodes+2:(2*num_nodes)+2]]
-            triangles = [[int(i) for i in triangle] for triangle in triangles]
-            normals = [norm(triangle) for triangle in triangles]
-            
+        num_nodes = int(surf[1].split(' ')[0])
+    except:
+        raise ValueError("%s is not a valid ASCII FreeSurfer surface."%(
+                         surf_fi_name))
+    # Separate out the x y z locations of nodes and 
+    # parse them to floats
+    nodes = [i.split() for i in surf[2:num_nodes+2]]
+    nodes = [[float(i) for i in node] for node in nodes]
+    
+    triangles = [i.split() for i in surf[num_nodes+2:(2*num_nodes)+2]]
+    triangles = [[int(i) for i in triangle] for triangle in triangles]
+    triangles_xyz = [[nodes[i] for i in triangle] for triangle in triangles]
+    normals = [norm(triangle[:3]) for triangle in triangles_xyz]
+    
 
-            # Get mins and maxes of x,y,z for coloring
-            x = [i[0] for i in nodes]
-            y = [i[1] for i in nodes]
-            z = [i[2] for i in nodes]
-            
-            x_range = max(x)-min(x)
-            y_range = max(y)-min(y)
-            z_range = max(z)-min(z) 
-            
-            return {"nodes":nodes, "triangles":triangles, "normals":normals,
-                    "x_range":x_range, "y_range":y_range, "z_range":z_range}
+    # Get mins and maxes of x,y,z for coloring
+    x = [i[0] for i in nodes]
+    y = [i[1] for i in nodes]
+    z = [i[2] for i in nodes]
+    
+    x_range = max(x)-min(x)
+    y_range = max(y)-min(y)
+    z_range = max(z)-min(z) 
+    
+    return {"nodes":nodes, "triangles":triangles, "normals":normals,
+            "x_range":x_range, "y_range":y_range, "z_range":z_range}
         
-    except IOError as e:
-        #TODO: Rethink error handling
-        print "Could not open surface file: %s"%str(e)
-        sys.exit(1)
-    except ValueError as e:
-        print "Error reading surface file: %s"%str(e)
-        sys.exit(1)
-
 if __name__ == '__main__':
- read_annot('rh.aparc.annot')
+    read_surface('test_dset/rh.inflated.asc')
