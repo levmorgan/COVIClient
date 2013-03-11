@@ -102,7 +102,8 @@ def read_binary_surface(surf_fi_name):
 
 def read_surface(surf_fi_name):
     if not re.match(r".*?\.asc$", surf_fi_name):
-        return read_binary_surface(surf_fi_name)
+        raise ValueError("COVI only supports FreeSurfer ASCII "+
+                         "surfaces at this time.")
     surf_fi = open(surf_fi_name, 'r')
     surf = surf_fi.read()
     
