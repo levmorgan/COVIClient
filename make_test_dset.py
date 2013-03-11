@@ -22,7 +22,6 @@ except:
 make_stat_files = True
 
 num_clusters = int(ceil(float(num_nodes)/nodes_per_clust))
-print num_clusters
 clust_fi = open('clusters.1D', 'w')
 clust_fi.write('%i\n'%0)
 for i in xrange(1,num_nodes):
