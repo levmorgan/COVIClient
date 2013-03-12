@@ -3,15 +3,17 @@ import ttk
 import tkFileDialog, tkMessageBox, tkFont, tkSimpleDialog
 import re, socket, os, threading, json, sys, inspect
 from tkCustomDialog import Dialog
-from NetworkThread import NetworkThread
 from Queue import Empty
 from collections import defaultdict
+import subprocess
 
 
 try:
-    from COVIClient.ProcessingThread import ProcessingThread
+    from COVIClient.COVIclientmodules.ProcessingThread import ProcessingThread
+    from COVIClient.COVIclientmodules.NetworkThread import NetworkThread
 except:
-    from ProcessingThread import ProcessingThread
+    from COVIclientmodules.ProcessingThread import ProcessingThread
+    from COVIclientmodules.NetworkThread import NetworkThread
 
 def is_error(obj):
     return isinstance(obj, Exception)
@@ -188,25 +190,32 @@ class MainWindow:
         set_state(self.root, 'disabled')
         set_state(self.switch_button, 'enabled')
         self.real_root.withdraw()
-        config_name = os.path.join(
-           os.path.dirname(inspect.stack()[-1][1]),
-           'suma.config')
         try:
-            
-            config_fi = open(config_name, 'r')
-            config = config_fi.read()
-            config_fi.close()
-            self.suma_file = json.loads(config)["suma"]
-            if not self.suma_file:
-                raise IOError()
-            
-                
-        except (IOError, KeyError):
+            self.suma_file = subprocess.check_output(
+                ["which", "suma"]).strip()
+        except subprocess.CalledProcessError:
+            # If we can't find suma, check if there is a config
+            # file telling us where it is.
+            # If not, ask the user where it is and create a config file. 
+            config_name = os.path.join(
+               os.path.dirname(inspect.stack()[-1][1]),
+               'suma.config')
             try:
-                self.configure()
-            except ValueError:
-                # We can't continue without a path to SUMA.
-                sys.exit(1)
+                
+                config_fi = open(config_name, 'r')
+                config = config_fi.read()
+                config_fi.close()
+                self.suma_file = json.loads(config)["suma"]
+                if not self.suma_file:
+                    raise IOError()
+                
+                    
+            except (IOError, KeyError):
+                try:
+                    self.configure()
+                except ValueError:
+                    # We can't continue without a path to SUMA.
+                    sys.exit(1)
             
             
         # If we're not connected, we need to choose a local dataset or server
