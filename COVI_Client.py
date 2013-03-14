@@ -1,8 +1,8 @@
+#!/usr/bin/python2.7
 import Tkinter as tk
 import ttk
 import tkFileDialog, tkMessageBox, tkFont, tkSimpleDialog
 import re, socket, os, threading, json, sys, inspect
-from tkCustomDialog import Dialog
 from Queue import Empty
 from collections import defaultdict
 import subprocess
@@ -11,9 +11,11 @@ import subprocess
 try:
     from COVIClient.COVIclientmodules.ProcessingThread import ProcessingThread
     from COVIClient.COVIclientmodules.NetworkThread import NetworkThread
+    from COVIClient.COVIclientmodules.tkCustomDialog import Dialog
 except:
     from COVIclientmodules.ProcessingThread import ProcessingThread
     from COVIclientmodules.NetworkThread import NetworkThread
+    from COVIclientmodules.tkCustomDialog import Dialog
 
 def is_error(obj):
     return isinstance(obj, Exception)
