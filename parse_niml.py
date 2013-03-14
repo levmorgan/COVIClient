@@ -150,6 +150,8 @@ class NIMLParser(object):
         '''
         Match data+closing tag
         '''
+        if not hasattr(node, 'ni_type'):
+            raise NIMLError("Expected a ni_type attribute")
         mat = self.match('(.*)<\s*%s\s*>')
         if not mat:
             raise NIMLError("Expected data and closing tag")
