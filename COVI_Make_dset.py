@@ -1,6 +1,7 @@
-import argparse
+#!/usr/bin/env python2.7
+import argparse, os
 from collections import defaultdict
-import FsFormats as FsF
+import COVIclientmodules.FsFormats as FsF
 
 def make_covi_dataset(annot_1D_roi, inflated_surface, matrix_file_name,
     matrix_corr_1D, path):
@@ -79,13 +80,31 @@ def create_clust_file(roi_node_map, all_nodes_xyz, path):
             clust_fi.write('%i\n'%(i))
         clust_fi.write('\n')
 
+def writeable_dir(op):
+    if os.path.isdir(op) and os.access(op, os.W_OK):
+        return op
+    else:
+        try:
+            os.mkdir(op)
+        except os.error:
+            raise argparse.ArgumentError(
+                "%s is not a writable directory, "%(str(op))+
+                "and could not be created.")
+
+def afni_head_brik(op):
+    if (os.access(op+'.HEAD', os.R_OK) or os.path.isdir(op+'.head', os.R_OK) and
+        os.access(op+'.BRIK', os.R_OK) or os.path.isdir(op+'.brik', os.R_OK)): 
+        return op
+    else:
+        raise argparse.ArgumentError(
+            "%s is missing a HEAD or BRIK file. "%(str(op)))
 
 if __name__ == '__main__':
     # Parse arguments
     '''
     TODO:
     -Parse arguments
-    -Parse the FUCKING spec file
+    -Parse the spec file
     -tgz the SurfVol, spec file, and attached surfaces
     Arguments:
     -op <output path>
@@ -94,3 +113,27 @@ if __name__ == '__main__':
     -matrix <1D covariance matrix>
     -annot1droi <.annot.1D.roi file>
     '''
+
+    parser = argparse.ArgumentParser(
+        description="COnnectome VIsualizer dataset creation script")
+    """
+    parser.add_argument('-spec', action='store', type=file,
+        help="<left or right hemisphere spec file>", required=True)
+    """
+    parser.add_argument('-inf', '--inflated', action='store', type=file,
+        help="<inflated surface file>", required=True)
+    parser.add_argument('-sv', '--SurfVol',  action='store', type=afni_head_brik,
+        help="<SurfVol file>", required=True)
+    parser.add_argument('-mat', '--matrix', action='store', type=file,
+        help="<a .corr.1D file output from @ROI_Corr_Mat>", required=True)
+    parser.add_argument('-roi', '--annot1droi', action='store', type=file,
+        help="<the .annot.1D.roi file, output by SUMA_make_spec_FS "+
+        "for the left or right hemisphere>", required=True)
+    parser.add_argument('-prefix', type=writeable_dir, action='store',
+        help="<the new dataset's name>", required=True)
+    results = parser.parse_args()
+    """
+    for i in results:
+        print i
+        print results.getattr(results, i)
+    """
