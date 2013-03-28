@@ -1,3 +1,4 @@
+#!/usr/bin/env python2.7
 from sys import argv, exit
 from math import ceil
 from random import gauss
