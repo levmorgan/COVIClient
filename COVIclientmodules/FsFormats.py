@@ -197,7 +197,7 @@ def read_annot_1D_roi(annot_file_name):
             node = int(node)
             roi = int(roi)
             r, g, b = (float(i) for i in (r, g, b))
-            data.append([roi, r, g, b])
+            data.append([node, roi, r, g, b])
         except (TypeError, NameError, ValueError):
             raise ValueError("Error reading %s:\n"%(annot_file_name)+
                 "The format for a .annot.1D.roi file is:\n"+

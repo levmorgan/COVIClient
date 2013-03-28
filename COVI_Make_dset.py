@@ -15,7 +15,7 @@ def make_covi_dataset(annot_1D_roi, inflated_surface, matrix_file_name,
         annot_1D_roi = FsF.read_annot_1D_roi(annot_1D_roi)
         # Create ROI=>Node map for create_clust_file
         roi_node_map = defaultdict(list)
-        for node, roi in enumerate(annot_1D_roi):
+        for node, roi, r, g, b in annot_1D_roi:
             roi_node_map[roi].append(node)
         all_nodes_xyz = FsF.read_surface(inflated_surface)["nodes"]
         corr_matrix = FsF.read_ROI_Corr_Matrix(matrix_file_name,
