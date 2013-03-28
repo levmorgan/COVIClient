@@ -234,7 +234,7 @@ def read_matrix_corr_1D(matrix_file_name):
 
     return data
 
-if __name__ == '__main__':
+#if __name__ == '__main__':
     #read_surface('test_dset/rh.inflated.asc')
     #rois, corr = read_ROI_Corr_Matrix('sub06204_matrix_all_ROIs.corr.1D', roi_filter=[2,5])
     #matrix = read_matrix_corr_1D('sub06204_matrix_all_ROIs.corr.1D')
