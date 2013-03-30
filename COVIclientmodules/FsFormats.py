@@ -168,6 +168,10 @@ def read_ROI_Corr_Matrix(corr_matrix_name, roi_filter=None):
     if roi_filter:
         filt = [i in roi_filter for i in rois]
         print filt
+        if not True in filt:
+            raise ValueError("None of the specified ROIs are present in "+
+                "the matrix.")
+        print roi_filter
         for i in roi_filter:
             it = itertools.izip(filt, corr_parsed[i])
             corr_filtered[i] = [j[1] for j in it if j[0]]
@@ -207,6 +211,7 @@ def read_annot_1D_roi(annot_file_name):
     return data
 
 
+"""
 def read_matrix_corr_1D(matrix_file_name):
     '''
     Read the 1D results file from @ROI_Corr_Mat
@@ -233,9 +238,57 @@ def read_matrix_corr_1D(matrix_file_name):
             "\ta line with correlations with each ROI separated by spaces")
 
     return data
+"""
 
-#if __name__ == '__main__':
+def read_1D_cmap(_1D_cmap_name):
+    try:
+        _1D_cmapfi = open(_1D_cmap_name, 'r')
+    except:
+        raise
+        return None
+    
+    # Find the first non-commented line
+    last = ''
+    curr = _1D_cmapfi.readline()
+
+    try:
+        while re.match('\s*#', curr):
+            last = curr
+            curr = _1D_cmapfi.readline()
+    except StopIteration:
+        raise ValueError("Error reading %s:\n"%(_1D_cmap_name)+
+            "There are no uncommented lines in the file.")
+    header = []
+    data = []
+
+    for line in itertools.chain([last, curr], _1D_cmapfi):
+        if re.match('\s*#', line):
+            header = re.sub(r"[#\)\(]", "", line)
+            try:
+                name, ilabel, r, g, b, surf_annotation = header.split()
+                header = [name, int(ilabel), int(r), int(g), int(b), 
+                    int(surf_annotation)]
+            except ValueError as e:
+                print e
+                raise ValueError("Error reading %s:\n"%(_1D_cmap_name)+
+                    "%s is not a valid comment line"%line)
+        else:
+            try:
+                roi, r, g, b, flag = line.split()
+                roi, flag = int(roi), int(flag)
+            except ValueError:
+                raise ValueError("Error reading %s:\n"%(_1D_cmap_name)+
+                    "%s is not a valid data line"%line)
+            data.append(header)
+            data[-1].extend([roi, flag])
+
+    return data
+
+
+if __name__ == '__main__':
     #read_surface('test_dset/rh.inflated.asc')
     #rois, corr = read_ROI_Corr_Matrix('sub06204_matrix_all_ROIs.corr.1D', roi_filter=[2,5])
     #matrix = read_matrix_corr_1D('sub06204_matrix_all_ROIs.corr.1D')
     #annot = read_annot_1D_roi('rh.aparc.a2009s.annot.1D.roi')
+    data = read_1D_cmap('rh.aparc.a2009s.annot.1D.cmap')
+    data = read_1D_cmap('lh.aparc.a2009s.annot.1D.cmap')

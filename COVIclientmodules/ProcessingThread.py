@@ -4,6 +4,7 @@ Created on Nov 28, 2012
 @author: morganl
 '''
 import itertools, subprocess, socket, re, signal, sys, os, time
+from collections import defaultdict
 from traceback import print_exc
 #from math import sqrt
 from threading import Thread
@@ -180,13 +181,13 @@ class ProcessingThread(Thread):
         Takes a file object or a cluster file split at '\n'
         '''
         # Preallocate the cluster array
-        self.clust = [0 for i in clust_dat if i != ''] 
+        self.clust = {}
         # Draw the graphic for each cluster at the first node in the cluster
         #TODO: Make sure the center vertex is always first 
         self.draw_here = []
-        cluster = 0
+        cluster = int(clust_dat[0])
         first = True
-        for i in clust_dat:
+        for i in clust_dat[1:]:
         # Empty lines signify a new cluster
             if i == '':
                 cluster += 1
