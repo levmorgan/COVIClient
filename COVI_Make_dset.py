@@ -14,6 +14,13 @@ def make_covi_dataset(aparc_fi, inflated_surface, matrix_fi, annot_1D_cmap,
     path: The path to write out the dataset
     '''
     try:
+        if re.match('rh', aparc_fi.name):
+            mode = 'rh'
+        elif re.match('lh', aparc_fi.name):
+            mode = 'lh'
+        else:
+            raise ValueError("Error: the .aparc.annot file must begin "+
+                "with either rh or lh.")
         all_nodes_xyz = FsF.read_surface(inflated_surface.name)["nodes"]
         annot_node = defaultdict(list)
         annot_data, color_table = FsF.read_annot(aparc_fi.name)
@@ -25,15 +32,36 @@ def make_covi_dataset(aparc_fi, inflated_surface, matrix_fi, annot_1D_cmap,
         ilabel_annot = { cm[1]:cm[-3] for cm in cmap }
         ilabel_matrix_header, matrix = FsF.read_ROI_Corr_Matrix(matrix_fi.name)
 
-        # Translate the ilabels the matrix is indexed with to annotations
-        matrix = { ilabel_annot[ilabel]:matrix[ilabel] for ilabel in matrix }
+
+        # Translate the ilabels in the matrix header to annotations
+        # We do it in this order since the dataset doesn't divide at the midpoint
+        # until after filtering
         annot_matrix_header = [ilabel_annot[i] for i in ilabel_matrix_header]
         _filter = [annot in annot_node for annot in annot_matrix_header]
+        ilabel_list = [n for n in itertools.compress(ilabel_matrix_header, _filter)]
+
+        # Pick left or right hemisphere
+        mid = int(0.5*len(ilabel_list))
+        if mode == 'lh':
+            ilabel_list = ilabel_list[:mid]
+            matrix = { ilabel:matrix[ilabel][:mid] 
+                for ilabel in ilabel_list }
+        elif mode == 'rh':
+            ilabel_list = ilabel_list[mid:]
+            matrix = { ilabel:matrix[ilabel][mid:] 
+                for ilabel in ilabel_list }
+
+        # Translate the keys in matrix
+        matrix = { ilabel_annot[ilabel]:matrix[ilabel] for ilabel in matrix }
+        # Create the list of annotations we're using
+        annot_list = [ilabel_annot[i] for i in ilabel_list]
+        """
         print ilabel_matrix_header
         print annot_matrix_header
         print annot_node.keys()
         print _filter
         print [annot in annot_matrix_header for annot in annot_node.keys()]
+        """
         # Filter out non-cortical areas
         corr_matrix = {}
         '''
@@ -56,8 +84,16 @@ def make_covi_dataset(aparc_fi, inflated_surface, matrix_fi, annot_1D_cmap,
                 pass
         #annot_list = [annot for i, annot in enumerate(annot_matrix_header) 
         #            if _filter[i]]
+        """
         annot_list = [n for n in itertools.compress(annot_matrix_header, _filter)]
+        ilabel_list = [n for n in itertools.compress(ilabel_matrix_header, _filter)]
+        print "ilabel_list"
+        print ilabel_list
+        print "annot_list"
+        print annot_list
         #matrix = { roi:matrix[roi] for roi in annot_node }
+        """
+        print ilabel_list
         
 
     except (ValueError, IOError) as e:

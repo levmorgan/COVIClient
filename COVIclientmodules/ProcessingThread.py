@@ -704,7 +704,8 @@ class ProcessingThread(Thread):
         Normalize val from being between self.threshold and 1
         to being from 0 to 1
         '''
-        return (val-self.threshold)/(1.0001-self.threshold)
+        #return (val-self.threshold)/(1.0001-self.threshold)
+        return val
             
     def color_data(self, filtered_matrix):
         '''
@@ -763,6 +764,7 @@ class ProcessingThread(Thread):
         
         # TODO: Make path generation use filtered_matrix
         filtered_matrix = [i for i in matrix if i[1] > self.threshold] 
+        print filtered_matrix
         colored = self.color_data(filtered_matrix)
         
         if os.path.exists(self.do_file):
