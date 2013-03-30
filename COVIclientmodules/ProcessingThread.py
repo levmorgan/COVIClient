@@ -108,8 +108,8 @@ class ProcessingThread(Thread):
                 stat_fi.close()
                 print 'Loaded matrix ok'
             except IOError:
-                #TODO: Handle a file error
-                raise
+                #tkMessageBox.showerror("Warning", )
+                matrix = [0.0 for i in self.clust]
             
         matrix = [float(i) for i in raw_matrix]
         # Map nodes to correlations
