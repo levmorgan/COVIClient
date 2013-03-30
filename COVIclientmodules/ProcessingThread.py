@@ -186,18 +186,23 @@ class ProcessingThread(Thread):
         #TODO: Make sure the center vertex is always first 
         self.draw_here = []
         cluster = int(clust_dat[0])
-        first = True
+        clust_num = True
+        center = False
         for i in clust_dat[1:]:
         # Empty lines signify a new cluster
             if i == '':
-                cluster += 1
-                first = True
+                clust_num = True
             else:
                 try:
-                    self.clust[int(i)] = cluster
-                    if first:
-                        self.draw_here.append(int(i))
-                        first = False
+                    if clust_num:
+                        cluster = int(i)
+                        center = True
+                        clust_num = False
+                    else:
+                        self.clust[int(i)] = cluster
+                        if center:
+                            self.draw_here.append(int(i))
+                            center = False
                 except IndexError:
                     print "Index error:"
                     print "int(i) == %i" % (int(i))
@@ -750,6 +755,8 @@ class ProcessingThread(Thread):
         if os.path.exists(self.do_file):
                 os.remove(self.do_file)
         
+        max_sphere_size = 10.
+
         if shape == 'paths':
             # Generate a list of the nodes we'll draw paths to
             nodelist = open('nodelist.1D', 'w')
@@ -842,9 +849,10 @@ class ProcessingThread(Thread):
             do_file.write("#node-based_spheres\n")
             if color == 'nodemap':
                 for i in xrange(0,self.num_nodes,4):
-                    do_file.write("%i %.3f 0.0 %.3f 1.0\n"%(i, 
+                    do_file.write("%i %.3f 0.0 %.3f %.3f\n"%(i, 
                                                     self.norm(float(i)/float(self.num_nodes)), 
-                                                    1.-self.norm(float(i)/float(self.num_nodes))))
+                                                    1.-self.norm(float(i)/float(self.num_nodes)).
+                                                    max_sphere_size))
             else:
                 if not colored:
                     colored = 4*[0.0]
@@ -866,7 +874,7 @@ class ProcessingThread(Thread):
                 i = colored[j]
                 corr = self.norm(filtered_matrix[j][1])
                 string = "%i %.3f %.3f %.3f %.3f %.3f\n"%(i[0], i[1], i[2], 
-                                                               i[3], i[4], 2.*corr+0.5)
+                    i[3], i[4], max_sphere_size*corr+0.5)
                 string = re.sub("nan", "0.0", string)
                 do_file.write(string)
 
