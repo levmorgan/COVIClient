@@ -111,9 +111,13 @@ class ProcessingThread(Thread):
                 #tkMessageBox.showerror("Warning", )
                 matrix = [0.0 for i in self.clust]
             
-        matrix = [float(i) for i in raw_matrix]
+        matrix = { i[0]:i[1] for i in 
+            [[int(j.split()[0]), float(j.split()[1])] for j in raw_matrix]}
+        #matrix = [float(i) for i in raw_matrix]
         # Map nodes to correlations
-        matrix = zip(self.draw_here, matrix)    
+        #matrix = zip(self.draw_here, matrix)    
+        matrix = [ [self.draw_here[roi], matrix[roi]] for roi in matrix ]
+        matrix.sort()
           
         return matrix
     
@@ -184,10 +188,10 @@ class ProcessingThread(Thread):
         self.clust = {}
         # Draw the graphic for each cluster at the first node in the cluster
         #TODO: Make sure the center vertex is always first 
-        self.draw_here = []
+        self.draw_here = {}
         cluster = int(clust_dat[0])
-        clust_num = True
-        center = False
+        clust_num = False
+        center = True
         for i in clust_dat[1:]:
         # Empty lines signify a new cluster
             if i == '':
@@ -201,7 +205,7 @@ class ProcessingThread(Thread):
                     else:
                         self.clust[int(i)] = cluster
                         if center:
-                            self.draw_here.append(int(i))
+                            self.draw_here[cluster] = int(i)
                             center = False
                 except IndexError:
                     print "Index error:"
@@ -209,6 +213,15 @@ class ProcessingThread(Thread):
                     print "len(clust) == %i" % (len(self.clust))
         
         #            assert cluster[-1] ==
+        """
+        a = self.draw_here.keys()
+        a.sort()
+        for i in a:
+            print i,
+            print ":",
+            print self.draw_here[i]
+            raw_input()
+        """
         print 'Loaded cluster file ok'
 
     def launch_suma_connect(self):
