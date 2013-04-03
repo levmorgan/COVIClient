@@ -61,7 +61,7 @@ class NetworkThread(threading.Thread):
             elif job[0] == 'die':
                 self.cont = False
                 self.sock.close()
-            elif not self.authenticated:
+            elif not self.authenticated and job[0] != "auth":
                 raise sc.RequestFailureException("dispatching", 
                      "you must be authenticated to run a(n) "+
                      "%s request"%(job[0]))

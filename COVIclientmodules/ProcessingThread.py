@@ -108,11 +108,14 @@ class ProcessingThread(Thread):
                 stat_fi.close()
                 print 'Loaded matrix ok'
             except IOError:
-                #tkMessageBox.showerror("Warning", )
-                matrix = [0.0 for i in self.clust]
+                tkMessageBox.showerror("Warning", "COVI has no data for that cluster")
+                # Generate a fake matrix file full of zeroes
+                raw_matrix = [' '.join([str(j) for j in i]) for i in 
+                    itertools.izip_longest(self.cluster_list, [], fillvalue=0.0)
+                    ]
+                print raw_matrix
             
-        matrix = { i[0]:i[1] for i in 
-            [[int(j.split()[0]), float(j.split()[1])] for j in raw_matrix]}
+        matrix = { i[0]:i[1] for i in [[int(j.split()[0]), float(j.split()[1])] for j in raw_matrix]}
         #matrix = [float(i) for i in raw_matrix]
         # Map nodes to correlations
         #matrix = zip(self.draw_here, matrix)    
@@ -138,6 +141,10 @@ class ProcessingThread(Thread):
         else:
             self.net_thread.job_q.put(['cluster', self.dset])
         raw_clusters = self.net_thread.recv_response(None)
+        
+        if not raw_clusters:
+            raise IOError("could not retrieve cluster data. Make sure "+
+                          "the dataset on the server is complete.")
             
         self.parse_clusters(raw_clusters.split('\n'))
         
@@ -147,8 +154,11 @@ class ProcessingThread(Thread):
         else:
             self.net_thread.job_q.put(['surface', self.dset, self.temp_dir])
         self.dset_path = self.net_thread.recv_response(None)
-        
-        files = os.listdir(self.dset_path)
+        if self.dset_path:
+            files = os.listdir(self.dset_path)
+        else:
+            raise IOError("could not retrieve surface data. Make sure "+
+                          "the dataset on the server is complete.")
         
         '''
         print files
@@ -167,11 +177,23 @@ class ProcessingThread(Thread):
             self.surfvol_file = [file for file in files 
                               if os.path.splitext(file)[1] == '.head' or 
                               os.path.splitext(file)[1] == '.HEAD'][0]
+            self.surfvol_file = [file for file in files 
+                              if os.path.splitext(file)[1] == '.head' or 
+                              os.path.splitext(file)[1] == '.HEAD'][0]
+            try:
+                self.annot_file = [file for file in files 
+                              if os.path.splitext(file)[1] == '.annot' or 
+                              os.path.splitext(file)[1] == '.ANNOT'][0]
+            except IndexError:
+                self.annot_file = None
             self.spec_file = os.path.join(self.dset_path, self.spec_file)
             self.surfvol_file = os.path.join(self.dset_path, self.surfvol_file)
+            if self.annot_file:
+                self.annot_file = os.path.join(self.dset_path, self.annot_file)
             
             print "Spec file: %s"%(self.spec_file)
             print "Surfvol file: %s"%(self.surfvol_file)
+            print "Annot file: %s"%(self.annot_file)
         except IndexError:
             tkMessageBox.showerror("Error", 
                 "The dataset did not contain a valid spec or surfvol file. "+
@@ -211,17 +233,8 @@ class ProcessingThread(Thread):
                     print "Index error:"
                     print "int(i) == %i" % (int(i))
                     print "len(clust) == %i" % (len(self.clust))
-        
-        #            assert cluster[-1] ==
-        """
-        a = self.draw_here.keys()
-        a.sort()
-        for i in a:
-            print i,
-            print ":",
-            print self.draw_here[i]
-            raw_input()
-        """
+        self.cluster_list = list(set(self.clust.values()))
+
         print 'Loaded cluster file ok'
 
     def launch_suma_connect(self):
@@ -692,6 +705,13 @@ class ProcessingThread(Thread):
         try:
             data, color_table = FsF.read_annot(annot_fi_name)
             self.annot = [color_table[i] for i in data]
+            test_val = self.annot[0]
+            # Make sure we have an annot file that doesn't need a cmap
+            if type(test_val) != list or len(test_val) != 5:
+                 tkMessageBox.showwarning("Could not read annot file",
+                     "The annot file in this dataset can't be read by COVI, "+
+                     "but SUMA should display the name of the cortical area.")
+                 self.annot = False
         except (IOError, ValueError, struct_error) as e:
             tkMessageBox.showerror("Could not read annot file", 
                        "%s If you want annotation data, "+
@@ -800,8 +820,8 @@ class ProcessingThread(Thread):
             ret = surfdist.wait()
             
             if ret != 0:
-                #TODO: Handle failure
-                pass
+                #Die, alet the user try again
+                return
             
             # Modify the brightness of each path to reflect its level of correlation
             paths_fi = open(self.do_file+".1D.do", 'r')
@@ -836,9 +856,9 @@ class ProcessingThread(Thread):
                     for line_ind in xrange(len(path)):
                         line = path[line_ind]
                         path[line_ind] = [int(line[0]), int(line[1]), 
-                             self.norm(matrix[indices[dest]][1]), 
+                             matrix[indices[dest]][1], 
                              0.0, 
-                             (1-self.norm(matrix[indices[dest]][1])), 
+                             1-self.norm(matrix[indices[dest]][1]), 
                              float(line[5])]
                 elif color == 'alpha':
                     for line_ind in xrange(len(path)):

@@ -192,13 +192,13 @@ class MainWindow:
         set_state(self.root, 'disabled')
         set_state(self.switch_button, 'enabled')
         self.real_root.withdraw()
+        # Try to find SUMA. If we can't, look for a config
+        # file telling us where it is. If there is none,
+        # ask the user where it is and create a config file.
         try:
             self.suma_file = subprocess.check_output(
                 ["which", "suma"]).strip()
-        except subprocess.CalledProcessError:
-            # If we can't find suma, check if there is a config
-            # file telling us where it is.
-            # If not, ask the user where it is and create a config file. 
+        except subprocess.CalledProcessError: 
             config_name = os.path.join(
                os.path.dirname(inspect.stack()[-1][1]),
                'suma.config')
@@ -221,6 +221,7 @@ class MainWindow:
             
             
         # If we're not connected, we need to choose a local dataset or server
+        init = None
         if self.net_thread and self.net_thread.authenticated:
             mode = 'server'
         else:
@@ -228,16 +229,22 @@ class MainWindow:
             init_dialog.title("COVI: Choose data source")
             if self.net_thread:
                 self.net_thread.job_q.put(["die"])
-            self.net_thread = NetworkThread()
-            init = InitWindow(init_dialog, self.net_thread)
+#             self.net_thread = NetworkThread()
+            init = InitWindow(init_dialog, NetworkThread())
             center_window(init_dialog)
             root.wait_window(init_dialog)
             mode = init.mode
 
         if mode == 'server':
-            dset_dialog = ServerDsetWindow(self.real_root,
+            if init:
+                self.net_thread = init.net_thread
+                dset_dialog = ServerDsetWindow(self.real_root,
                                             net_thread=self.net_thread,
                                             title="COVI: %s: Datasets"%init.user_var.get())
+            else:
+                dset_dialog = ServerDsetWindow(self.real_root,
+                                            net_thread=self.net_thread,
+                                            title="COVI: Server Datasets")
             if hasattr(dset_dialog, 'dset'):
                 self.dset = dset_dialog.dset
                 if type(self.dset) == list:
@@ -357,6 +364,12 @@ class MainWindow:
                             set_state(self.real_root, 'enabled')
                 except Empty:
                     pass
+        if self.net_thread and self.net_thread not in threading.enumerate():
+            tkMessageBox.showwarning("Connection to server lost", 
+                  "The connection to the server has been lost. "+
+                  "Reload  your dataset to continue using COVI.")
+            self.proc_not_ready()
+            self.net_thread = False
         
         self.root.after(100, self.poll)
         
@@ -458,11 +471,11 @@ class MainWindow:
             self.mode_var = tk.StringVar()
             self.mode_var.set("sized spheres")
         mode_menu = tk.Menu(root_menu, tearoff=0)
-        """
+        
         mode_menu.add_radiobutton(label="Paths", variable=self.mode_var,
                 command=lambda: self.mode_command("paths"),
                 value="paths")
-        """
+        
         mode_menu.add_radiobutton(label="Spheres", variable=self.mode_var,
                 command=lambda: self.mode_command("spheres"),
                 value="spheres")
