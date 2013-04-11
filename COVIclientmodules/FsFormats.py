@@ -1,6 +1,74 @@
 from struct import error as struct_error, unpack
 import re, sys, itertools
 
+def _next(iterator):
+    try:
+        return iterator.next()
+    except StopIteration:
+        return None
+
+def read_spec(spec_fi_name, suppress=False):
+    '''
+    Read and parse a SUMA spec file.
+    Arguments:
+    spec_fi_name: path to a spec file
+    suppress: optional, boolean, whether to suppress errors
+    Returns:
+    spec: A list of the .spec file's root attributes. A list of 2-lists.
+    surfaces: A list of maps with the attributes of each surface
+    '''
+    spec_fi = open(spec_fi_name, 'r')
+    spec = []
+    surfaces = []
+    try:
+        line = spec_fi.next()
+        line = line.strip()
+    except StopIteration:
+        return {}
+
+    while line != None:
+        line = line.strip()
+        # Skip comments
+        if re.match('#', line):
+            line = _next(spec_fi)
+            continue
+
+        # Read in info for a new surface and append it to the surface list
+        if re.match("NewSurface", line):
+            surf = {}
+            line = _next(spec_fi)
+            line = line.strip()
+            while line:
+                try:
+                    field, value = line.split(' = ')
+                    surf[field] = value
+                except ValueError:
+                    if not suppress:
+                        raise ValueError("Invalid line in %s: %s"%(
+                            spec_fi_name, line))
+                line = _next(spec_fi)
+                line = line.strip()
+            
+            """
+            try:
+                spec_fi[surf["FreeSurferSurface"]] = surf
+            except KeyError:
+                if not suppress:
+                    raise ValueError("Surface in %s is missing ")
+            """
+
+            surfaces.append(surf)
+
+        # If it's not a blank line, parse an attribute
+        else:
+            if line:
+                spec.append(line.split(' = '))
+                
+        # Read in the next line
+        line = _next(spec_fi)
+    return (spec, surfaces)
+
+
 def read_annot(annot_file_name):
     '''
     Based on read_annotation.m
@@ -72,6 +140,8 @@ def read_annot(annot_file_name):
 def read_annot_pythonic(annot_file_name):
     '''
     Loads an annot file and returns a map from node numbers to color table rows
+    Arguments:
+    annot_file_name: path to an annot file
     '''
     data, color_table = read_annot(annot_file_name)
     return [color_table[i] for i in data]
@@ -95,13 +165,12 @@ def norm(t1):
 
     return norm
 
-
-def read_binary_surface(surf_fi_name):
-    print "Pretend we're reading a binary surface: %s"%(surf_fi_name)
-    pass
-
-
 def read_surface(surf_fi_name):
+    '''
+    Read and parse a FreeSurfer .asc surface file.
+    Arguments:
+    surf_fi_name: path to a .asc file
+    '''
     if not re.match(r".*?\.asc$", surf_fi_name):
         raise ValueError("COVI only supports FreeSurfer ASCII "+
                          "surfaces at this time.")
