@@ -81,18 +81,21 @@ class NetworkThread(threading.Thread):
         '''
         Get the response from the server, handling missing or incorrect responses
         '''
-        res = self.res_q.get(True, 5)
-        wait = True
-        while wait and not res:
-            try:
-                res = self.res_q.get(True, 5)
-                wait = False
-            except Empty:
-                wait = tkMessageBox.askyesno("Network Issue", 
-                    "The response from the server is  taking longer than "+
-                    "expected. Continue waiting?")
-        if wait == False:
-            return False
+        try:
+            res = self.res_q.get(True, 5)
+        except Empty:
+            res = False
+            wait = True
+            while wait and not res:
+                try:
+                    res = self.res_q.get(True, 5)
+                    wait = False
+                except Empty:
+                    wait = tkMessageBox.askyesno("Network Issue", 
+                        "The response from the server is  taking longer than "+
+                        "expected. Continue waiting?")
+            if wait == False:
+                return False
 
         # Go through responses from the server until we find the 
         # one that we want

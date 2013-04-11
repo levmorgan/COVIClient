@@ -115,7 +115,7 @@ class ProcessingThread(Thread):
                     ]
                 print raw_matrix
             
-        matrix = { i[0]:i[1] for i in [[int(j.split()[0]), float(j.split()[1])] for j in raw_matrix]}
+        matrix = { i[0]:i[1] for i in [[int(j.split()[0]), float(j.split()[1])] for j in raw_matrix] }
         #matrix = [float(i) for i in raw_matrix]
         # Map nodes to correlations
         #matrix = zip(self.draw_here, matrix)    
@@ -891,6 +891,7 @@ class ProcessingThread(Thread):
             else:
                 if not colored:
                     colored = 4*[0.0]
+                    colored.insert(0,0)
                     filtered_matrix = [0]
                 for i in colored:
                     string = "%i %.3f %.3f %.3f %.3f\n"%(i)

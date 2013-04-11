@@ -462,6 +462,28 @@ class MainWindow:
             self.proc_thread.job_q.put_nowait(['suma'])
         else:
             self.proc_not_ready()
+
+    def disconnect_command(self):
+        '''
+        End a network session and disconnect from the server
+        '''
+        answer = tkMessageBox.askyesno("Warning", 
+            "This will end your current COVI session. Continue?")
+        if not answer:
+            return
+
+        if self.net_thread:
+            if self.net_thread in threading.enumerate():
+                self.net_thread.job_q.put(["close"])
+                self.net_thread.job_q.put(["die"])
+            self.net_thread = False
+            if self.proc_thread and self.proc_thread.ready():
+                self.proc_thread.job_q.put(["die"])
+        else:
+            tkMessageBox.showinfo("Can't disconnect from server",
+                "COVI Client is not connected to a server.")
+
+
             
     def make_mode_menu(self, root_menu):
         '''
@@ -513,6 +535,8 @@ class MainWindow:
         self.file_menu = tk.Menu(self.menu, tearoff=0)
         self.file_menu.add_command(label="Open dataset/Connect to server",
                                    command=self.begin_session)
+        self.file_menu.add_command(label="Disconnect from server",
+                                   command=self.disconnect_command)
         self.file_menu.add_separator()
         self.file_menu.add_command(label="Quit", command=self.cleanup)
         self.menu.add_cascade(label="File", menu=self.file_menu)
