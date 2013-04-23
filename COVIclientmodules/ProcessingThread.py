@@ -14,6 +14,7 @@ from struct import unpack
 from struct import error as struct_error
 import tkMessageBox
 import FsFormats as FsF
+# import __future__
 class ProcessingThread(Thread):
     
     def ready(self):
@@ -92,6 +93,16 @@ class ProcessingThread(Thread):
         self.colors = itertools.cycle(["brightness", "heat"])
 
     def get_matrix(self, cluster_num):
+        '''
+        Fetch a matrix for a given cluster number. If in server mode,
+        get it from the server. If not, read it locally.
+        
+        Args:
+        cluster_num: The number of the cluster to load
+        
+        Returns:
+        matrix: a list of [int node to draw on, float correlation]
+        '''
         if self.mode == 'server':
             self.net_thread.job_q.put(["matrix", self.dset, cluster_num])
             raw_matrix = self.net_thread.recv_response(expected='binary')
@@ -127,7 +138,7 @@ class ProcessingThread(Thread):
     def fetch_initial_data(self):
         '''
         In server mode, download the surface, volume, and cluster files we 
-        need to start the session.
+        need to start the session. Can't be called in client mode.
         '''
         #TODO: Handle all the exceptions in this method.
         print self.temp_dir
@@ -208,8 +219,7 @@ class ProcessingThread(Thread):
         '''
         # Preallocate the cluster array
         self.clust = {}
-        # Draw the graphic for each cluster at the first node in the cluster
-        #TODO: Make sure the center vertex is always first 
+        # Draw the graphic for each cluster at the first node in the cluster 
         self.draw_here = {}
         cluster = int(clust_dat[0])
         clust_num = False
@@ -337,6 +347,10 @@ class ProcessingThread(Thread):
             self.annot = None
 
     def run(self):
+        '''
+        The main loop. Create a socket, start SUMA, and start taking commands.
+        '''
+        # Create a NIML socket 
         self.svr_socket = socket.socket(socket.AF_INET, 
                                     socket.SOCK_STREAM)
         self.svr_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -369,7 +383,6 @@ class ProcessingThread(Thread):
             # Alternately check the socket and command queue 
             try:
                 # Check for mouse clicks in SUMA 
-#                dat = self.recv_data()
                 dat = self.recv_data()
                 if dat:
                     self.last_dat = dat
@@ -407,6 +420,18 @@ class ProcessingThread(Thread):
         self.svr_socket.close()
         
     def load_niml_surfaces(self, data):
+        '''
+        Load surfaces that SUMA sends over the NIML connection. 
+        This doesn't work, so don't rely on its results
+        
+        Args:
+        data: The raw NIML SUMA sends when a connection is initiated
+        
+        Returns:
+        None, but sets self.surfaces 
+        '''
+        
+        #FIXME This method doesn't work
         error_title = "Could not read data from SUMA"
         error_msg = "The data from SUMA could not be read:\n%s\nTry restarting COVI."
         surface_offsets = [ i.start() for i in 
@@ -459,12 +484,23 @@ class ProcessingThread(Thread):
         self.surfaces = surfaces
 
     def set_surface(self, surface_label):
+        '''
+        Sets the necessary variables to make a surface active.
+        Args:
+        surface_label: The label of the surface to make active
+        '''
         self.nodes, self.num_nodes, self.volume_idcode, self.surface_idcode, mins, maxes = self.surfaces[surface_label]
         self.x_range = maxes[0]-mins[0]
         self.y_range = maxes[1]-mins[1]
         self.z_range = maxes[2]-mins[2] 
                 
     def handle_mouse_click(self, dat, force_update=False):
+        '''
+        Handle the NIML message SUMA sends when a node is selected
+        Args:
+        dat: String containing NIML data
+        force_update: If true, redraw even if same cluster has been selected
+        '''
         try:
             self.surface_nodeid, self.surface_idcode, surface_label = re.findall(
                      '<SUMA_crosshair_xyz\n  ni_type="float"\n  ni_dimen="3"\n  '+
@@ -478,14 +514,7 @@ class ProcessingThread(Thread):
                         self.load_surface(os.path.join(os.path.split(self.spec_file)[0], 
                                                        self.surface_label))
                 except (IOError, ValueError, struct_error, IndexError):
-                    return
-                    """
-                    try:
-                        self.set_surface(surface_label)
-                    except KeyError:
-                        return
-                        """
-                                               
+                    return                               
                 
                 print "Loaded new surface"
             self.surface_nodeid = int(self.surface_nodeid)
@@ -512,8 +541,7 @@ class ProcessingThread(Thread):
                 self.send_displayable_object(self.surface_nodeid, matrix)
                 print "Sent DO"
             else:
-                print "Same cluster selected" #                                                     [[i, uniform(0,1)]
-                    #                                                         for i in clusters])
+                print "Same cluster selected"
         except IndexError:
             # If we didn't find the data we were looking for
             # in the SUMA response, tell the user, but carry on
@@ -524,7 +552,7 @@ class ProcessingThread(Thread):
 
     def recv_data(self):
         '''
-        Recieve data of indeterminate length and return it
+        Recieve data of indeterminate length from SUMA and return it
         '''
         dat_array = []
         dat = self.socket.recv(1024)
@@ -541,6 +569,9 @@ class ProcessingThread(Thread):
     def handle_cmd(self, cmd):
         '''
         Handle a command from some other part of the program
+        
+        Args:
+        cmd: a list of size 1 or 2 containing the command 
         '''
         #TODO: Finish handle command method
         
@@ -582,101 +613,14 @@ class ProcessingThread(Thread):
             print "Got an invalid command: ",
             print cmd
             return 
-
-    """
-    def interp_parabola(self, p1, p2, normal, height, n=20):
-        '''
-        Create a parabola of height "height", interpolated at n points, 
-        between 3D points p1 and p2, pointing in the direction of 
-        3D vector "normal".
-        '''
-        rng, offset = (0, 0)
-        make_line = lambda x: (x*(rng/float(n)))+offset
-        p1p2 = [i[1]-i[0] for i in itertools.izip(p1,p2)]
-        line = [[], [], []]
-        
-        # Calculate the line between p1 and p2
-        for i in xrange(3):
-            rng = p1p2[i]
-            offset = p1[i[i] = [ j for j in itertools.imap(make_line, xrange(n+1)) ]
-        
-        # Calculate the parabola in 2D
-        rng = sqrt( p1p2[0]**2 + p1p2[1]**2 + p1p2[2]**2 )
-        offset = 0
-        # parabola_2 = [ height*(i)(i-rng) for i in itertools.imap(make_line, xrange(n+1)) ]
-        parabola_2 = [ height*(i)*(i-rng) for i in 
-                      itertools.imap(make_line, xrange(n+1)) ]
-        
-        # Calculate the parabola in 3D
-        parabola_3 = [[], [], []]
-        for i in xrange(3):
-            parabola_3[i] = [ j[0] + j[1]*normal[i] 
-                             for j in itertools.izip(line[i], parabola_2) ]
-            
-        return parabola_3
-    """
-    
-    def interp_circle(self, p1, p2, normal, height=None, n=20):
-        pass
-    """    
-    def create_nido_segments_coord(self, src_node, matrix):
-        '''
-        Takes a source node and a list of nodes it's connected to. 
-        Produces a displayable object of circles connecting the source node
-        to destination nodes.
-        '''
-        nido_array = ['#coordinate-based_segments',]
-        src_coords = self.get_node_coords(src_node)
-        src_normal = self.get_node_normal(src_node)
-        for dst_node in matrix:
-            dst_coords = self.get_node_coords(dst_node)
-            dst_normal = self.get_node_normal(dst_node)
-            average_normal = [(i[0]+i[1])/2. for i in itertools.izip(src_normal, dst_normal)]
-            segments = self.interp_circle(src_coords, dst_coords, average_normal)
-            segments_text = range(1, len(segments))
-            for i in xrange(len(segments_text)):
-                segments_text[i] = "%i %i %i %i %i %i\n"%(
-                                                          segments[i-1][0],
-                                                          segments[i-1][1],
-                                                          segments[i-1][2],
-                                                          segments[i][0],
-                                                          segments[i][1],
-                                                          segments[i][2])
-    """
     
     def load_surface(self, surf_fi_name):
+        '''
+        Load a new FreeSurfer ASC surface and make it active.
+        Args:
+        surf_fi_name: The path to the surface file
+        '''
         try:
-            """
-            surf_fi = open(surf_fi_name, 'r')
-            surf = surf_fi.read()
-            
-            #TODO: Support binary surfaces
-            #TODO: Make this a separate library
-            if not re.match("#!ascii", surf):
-                raise ValueError("Only ASCII surface files (.asc files) are currently supported")
-            else:
-                # Load an ASCII surface
-                surf = surf.split('\n')
-                num_nodes = int(surf[1].split(' ')[0])
-                # Separate out the x y z locations of nodes and 
-                # parse them to floats
-                nodes = [i.split() for i in surf[2:num_nodes+2]]
-                nodes = [[float(i) for i in node] for node in nodes]
-                self.nodes = nodes
-                
-                triangles = [i.split() for i in surf[num_nodes+2:(2*num_nodes)+2]]
-                triangles = [[int(i) for i in triangle] for triangle in triangles]
-                self.triangles = triangles
-                
-                # Get mins and maxes of x,y,z for coloring
-                x = [i[0] for i in nodes]
-                y = [i[1] for i in nodes]
-                z = [i[2] for i in nodes]
-                
-                self.x_range = max(x)-min(x)
-                self.y_range = max(y)-min(y)
-                self.z_range = max(z)-min(z) 
-                """
             res = FsF.read_surface(surf_fi_name)
             self.x_range = res["x_range"]
             self.y_range = res["y_range"]
@@ -702,6 +646,12 @@ class ProcessingThread(Thread):
             raise
     
     def load_annot(self, annot_fi_name):
+        '''
+        Load a FreeSurfer annot file with included color table.
+        
+        Args:
+        annot_fi_name: The path to the annot file
+        '''
         try:
             data, color_table = FsF.read_annot(annot_fi_name)
             self.annot = [color_table[i] for i in data]
@@ -731,6 +681,13 @@ class ProcessingThread(Thread):
         '''
         Given a list of nodes and their correlations,
         make a list of nodes and RGBA values given the current coloring mode
+        
+        Args:
+        filtered_matrix: A list of [int node to draw on, float correlation]
+        
+        Returns:
+        colored: List of [int node to draw on, 
+                          float R, float G, float B, float A]
         '''
         # Normalize a value self.threshold<=t<=1 to 0<=t<=1
         if self.color == 'heat':
@@ -772,8 +729,12 @@ class ProcessingThread(Thread):
     def send_displayable_object(self, src_node, matrix):
         '''
         Takes a source node and a list of nodes it's connected to. 
-        Produces a displayable object node-based lines connecting the 
-        source node to destination nodes and loads it into SUMA.
+        Produces a displayable object node-based connecting the 
+        source node to destination nodes, or spheres, and loads it into SUMA.
+        
+        Args:
+        src_node: int source node
+        matrix: A list of [int node to draw on, float correlation]
         '''
         # Valid shapes: paths, spheres (only supports heat)
         # Valid colors: brightness, heat, alpha
@@ -835,12 +796,6 @@ class ProcessingThread(Thread):
             paths = [[line.split(' ') for line in path] for path in paths]
             # Remove the empty line at the end of the file
             del paths[-1]
-            """
-            print "Indices:"
-            print len(indices)
-            print "Paths:"
-            print len(paths)
-            """
             for dest in xrange(len(indices)):
                 path = paths[dest]
                 if color == 'brightness': 
@@ -927,14 +882,27 @@ class ProcessingThread(Thread):
     def get_node_coords(self, node):
         '''
         Look up a node's xyz coordinates from its node number.
+        Nonworking, obviously.
+        
+        Args:
+        node
         '''
         return range(3)
     
     def redraw(self):
+        '''
+        A shortcut method to for a redraw.
+        '''
         self.handle_mouse_click(self.last_dat, 
                                 force_update=True)
     
     def handle_input(self, inp):
+        '''
+        Obsolete method to handle input from the command line.
+        
+        Args:
+        inp: A string of input from the command line
+        '''
         inp = inp.strip()
         
         if re.match("[sS]", inp):
@@ -948,6 +916,12 @@ class ProcessingThread(Thread):
         self.redraw()
             
 def input_loop(proc_thread):
+    '''
+    Obsolete method to handle input from the command line.
+    
+    Args:
+    proc_thread: The processing thread
+    '''
     print "Taking input now"
     while True:
         proc_thread.handle_input(raw_input())
