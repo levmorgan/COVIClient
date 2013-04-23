@@ -5,12 +5,17 @@ from traceback import print_exc
 import tkMessageBox
 
 class NetworkThread(threading.Thread):
+    '''
+    Thread to communicate with COVI server. Takes jobs from job_q,
+    executes them with ServerCommunication, and returns the results in res_q.
+    '''
     def __init__(self):
         super(NetworkThread, self).__init__()
         self.cont = True
         self.job_q = Queue()
         self.res_q = Queue()
 
+        # Map job commands to ServerCommunication methods
         self.dispatch = {
             "auth":sc.auth,
             "list":sc.lst,
@@ -41,9 +46,21 @@ class NetworkThread(threading.Thread):
         self.setDaemon(True)
         
     def set_auth(self, authed=True):
+        '''
+        Set whether the client has authenticated with the server.
+        If so, allow commands other than connect, auth, and die to 
+        be executed.
+        
+        Args:
+        authed: Whether or not client is autheniticated 
+        '''
         self.authenticated = authed
 
     def run(self):
+        '''
+        Execute jobs from the job queue, putting results (including exceptions)
+        in the results queue. 
+        '''
         while self.cont:
             # Take a job off the job queue, 
             # blocking if it's empty
@@ -79,7 +96,16 @@ class NetworkThread(threading.Thread):
 
     def recv_response(self, expected="req ok"):
         '''
-        Get the response from the server, handling missing or incorrect responses
+        Get the response from the server, handling missing or incorrect responses.
+        
+        Args:
+        expected: The expected response type. An exception will be raised if
+                  there is no response of this type waiting to be processed.
+                  This method discards responses waiting to be processed 
+                  until it finds one of type expected. 
+                  If expected is None, any response type will be accepted.
+        Returns:
+        True if the response was of type "req ok", the response otherwise
         '''
         try:
             res = self.res_q.get(True, 5)
